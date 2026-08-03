@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VBT Analyzer — 挙上速度・パワー解析</title>
+<meta name="description" content="ウエイトトレーニングの動画から挙上速度とパワーを算出し、推移をグラフ化する。ブラウザだけで動作し、動画は端末外に送信しない。">
+<link rel="stylesheet" href="css/style.css?v=14">
+</head>
+<body>
+
+<header>
+  <div class="head-row">
+    <div class="brand">VBT Analyzer<small>挙上速度・パワー解析</small></div>
+    <div class="spacer"></div>
+    <button class="btn" id="themeBtn" type="button" title="表示テーマを切り替える">◐ テーマ</button>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" id="tab-analyze" aria-controls="panel-analyze" aria-selected="true">解析</button>
+    <button role="tab" id="tab-history" aria-controls="panel-history" aria-selected="false">履歴と推移</button>
+    <button role="tab" id="tab-guide" aria-controls="panel-guide" aria-selected="false">使い方</button>
+  </nav>
+</header>
+
+<main>
+
+<!-- ============================= 解析タブ ============================= -->
+<section class="panel" id="panel-analyze" role="tabpanel" aria-labelledby="tab-analyze">
+
+  <div class="card">
+    <h2><span class="step-no">1</span>映像を用意する</h2>
+    <div class="mode-row" style="margin-top:0">
+      <button class="btn primary" id="srcFileBtn" type="button">動画ファイルを使う</button>
+      <button class="btn" id="srcCamBtn" type="button">カメラで撮る</button>
+    </div>
+
+    <div id="srcFilePane">
+      <p class="hint">バーの端に貼った目印（蛍光テープなど）が全レップ映っている動画を選びます。動画は端末内で処理され、どこにも送信されません。</p>
+      <input type="file" id="videoInput" accept="video/*">
+      <div class="grid" style="margin-top:10px">
+        <label class="field">スロー倍率
+          <select id="slowFactor">
+            <option value="1">通常撮影（等倍）</option>
+            <option value="2">2倍スロー</option>
+            <option value="4">4倍スロー（120fps→30fps）</option>
+            <option value="8">8倍スロー（240fps→30fps）</option>
+          </select>
+        </label>
+      </div>
+      <p class="hint small">スマホのスローモーション撮影を使った場合のみ変更します。実時間 = 動画時間 ÷ 倍率。</p>
+    </div>
+
+    <div id="srcCamPane" hidden>
+      <p class="hint">カメラを開いて、その場で撮影しながら解析します。<strong>カメラは三脚などで固定し、撮影中は動かさないでください</strong>（動かすと較正がずれます）。</p>
+      <div class="mode-row">
+        <select id="camDevice" title="使用するカメラ"><option value="">カメラを選択</option></select>
+        <select id="camQuality" title="解像度とフレームレート">
+          <option value="1280x720x60">1280×720 / 60fps（推奨）</option>
+          <option value="1920x1080x60">1920×1080 / 60fps</option>
+          <option value="1280x720x30">1280×720 / 30fps</option>
+          <option value="640x480x30">640×480 / 30fps（軽い）</option>
+        </select>
+      </div>
+      <div class="mode-row">
+        <button class="btn primary" id="camStartBtn" type="button">カメラを開く</button>
+        <button class="btn" id="camStopBtn" type="button" hidden>カメラを閉じる</button>
+      </div>
+      <p class="status-line" id="camStatus"></p>
+    </div>
+
+    <p class="status-line" id="videoInfo">未選択</p>
+  </div>
+
+  <div class="card">
+    <h2><span class="step-no">2</span>スケール較正</h2>
+    <p class="hint">画面上の2点をクリックし、その実寸を入力します。ピクセル→メートルの換算に使います。</p>
+    <div class="stage empty" id="stage">
+      <div class="placeholder" id="stagePlaceholder">動画を読み込むとここに表示されます</div>
+      <!-- カメラ映像はブラウザにそのまま描かせる。非表示の video はフレームが更新されず、
+           canvas に写し取っても止まった絵になるため。 -->
+      <video id="camEl" class="stage-video" playsinline muted autoplay hidden></video>
+      <canvas id="frameCanvas" hidden></canvas>
+      <canvas id="overlayCanvas" class="overlay" hidden></canvas>
+    </div>
+    <label class="field" style="margin-top:10px" id="frameSeekWrap">表示するフレーム
+      <input type="range" id="frameSeek" min="0" max="100" value="0" step="0.1" disabled>
+    </label>
+    <div class="mode-row">
+      <button class="btn" id="calibBtn" type="button" disabled>2点をクリックして較正</button>
+      <select id="knownPreset">
+        <option value="450">プレート直径 450mm（20kg規格）</option>
+        <option value="1310">バー内側リング間 1310mm</option>
+        <option value="2200">バー全長 2200mm（男子）</option>
+        <option value="2010">バー全長 2010mm（女子）</option>
+        <option value="custom">自分で入力</option>
+      </select>
+      <label class="field" id="customLenWrap" hidden>実寸(mm)
+        <input type="number" id="knownLength" value="450" min="10" step="1" style="width:100px">
+      </label>
+    </div>
+    <p class="status-line" id="calibStatus">未較正</p>
+  </div>
+
+  <div class="card">
+    <h2><span class="step-no">3</span>マーカーの色を指定</h2>
+    <p class="hint">上の映像でマーカーをクリックすると、その色を追跡対象にします。緑の網かけがマーカーだけを覆うようにスライダーを調整してください。</p>
+    <div class="mode-row">
+      <button class="btn" id="pickBtn" type="button" disabled>マーカーをクリックして指定</button>
+      <span class="swatch" id="pickedSwatch" title="指定した色"></span>
+      <label class="field" style="flex-direction:row;align-items:center;gap:6px">
+        <input type="checkbox" id="achromatic" style="width:auto"> 白/黒/銀の目印
+      </label>
+    </div>
+    <div class="grid" style="margin-top:8px">
+      <label class="field"><span>色相の許容幅 <span id="hueTolVal">18</span>°</span>
+        <input type="range" id="hueTol" min="4" max="60" value="18" step="1">
+      </label>
+      <label class="field"><span>彩度の下限 <span id="satMinVal">0.35</span></span>
+        <input type="range" id="satMin" min="0.05" max="0.95" value="0.35" step="0.01">
+      </label>
+      <label class="field"><span>明度の下限 <span id="valMinVal">0.25</span></span>
+        <input type="range" id="valMin" min="0.02" max="0.95" value="0.25" step="0.01">
+      </label>
+    </div>
+    <p class="status-line" id="maskStatus">未指定</p>
+  </div>
+
+  <div class="card">
+    <h2><span class="step-no">4</span>セット情報</h2>
+    <div class="grid">
+      <label class="field">日付<input type="date" id="fDate"></label>
+      <label class="field">選手名<input type="text" id="fAthlete" list="athleteList" placeholder="例: 山田"></label>
+      <label class="field">種目
+        <input type="text" id="fExercise" list="exerciseList" value="バックスクワット">
+      </label>
+      <label class="field">バー重量 (kg)<input type="number" id="fLoad" value="60" min="0" step="0.5"></label>
+      <label class="field">追加システム質量 (kg)<input type="number" id="fExtra" value="0" min="0" step="0.5"></label>
+    </div>
+    <p class="hint small">追加システム質量：スクワットなどで体重の一部を加味したい場合に入力します。0のままならバー重量だけで力とパワーを計算します（一般的なVBT表示と同じ）。</p>
+    <label class="field" style="margin-top:8px">メモ<textarea id="fNote" placeholder="コンディション、狙いなど"></textarea></label>
+    <datalist id="exerciseList">
+      <option value="バックスクワット"></option>
+      <option value="フロントスクワット"></option>
+      <option value="ベンチプレス"></option>
+      <option value="デッドリフト"></option>
+      <option value="ショルダープレス"></option>
+      <option value="パワークリーン"></option>
+      <option value="スナッチ"></option>
+    </datalist>
+    <datalist id="athleteList"></datalist>
+
+    <details style="margin-top:12px">
+      <summary class="hint" style="cursor:pointer">解析の詳細設定</summary>
+      <div class="grid" style="margin-top:10px">
+        <label class="field">処理解像度 (px幅)
+          <select id="oProcWidth">
+            <option value="360">360（速い）</option>
+            <option value="480" selected>480（標準）</option>
+            <option value="640">640（精密・遅い）</option>
+          </select>
+        </label>
+        <label class="field">再生速度（解析中）
+          <select id="oRate">
+            <option value="1" selected>1.0倍（推奨）</option>
+            <option value="2">2.0倍（速いが取りこぼしあり）</option>
+            <option value="4">4.0倍</option>
+          </select>
+        </label>
+        <label class="field">平滑化の窓 (秒)<input type="number" id="oSmooth" value="0.08" min="0.02" max="0.3" step="0.01"></label>
+        <label class="field">レップ判定の速度閾値 (m/s)<input type="number" id="oVelThr" value="0.15" min="0.02" max="1" step="0.01"></label>
+        <label class="field">レップ判定の最小可動域 (m)<input type="number" id="oMinRom" value="0.12" min="0.02" max="1" step="0.01"></label>
+        <label class="field">探索半径 (処理px)<input type="number" id="oRadius" value="90" min="20" max="300" step="5"></label>
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2><span class="step-no">5</span>解析する</h2>
+
+    <div class="btn-row" style="margin-top:0" id="runFilePane">
+      <button class="btn primary" id="runBtn" type="button" disabled>解析を実行</button>
+      <button class="btn" id="cancelBtn" type="button" hidden>中止</button>
+    </div>
+
+    <div id="runCamPane" hidden>
+      <div class="btn-row" style="margin-top:0">
+        <button class="btn primary" id="recBtn" type="button" disabled>録画開始</button>
+        <button class="btn" id="recStopBtn" type="button" hidden>停止して解析</button>
+        <button class="btn" id="recSaveBtn" type="button" hidden>録画した動画を保存</button>
+      </div>
+      <p class="status-line" id="recStatus"></p>
+      <div class="tiles" id="liveTiles" hidden>
+        <div class="tile hero">
+          <div class="label">直前のレップ 平均推進速度</div>
+          <div class="value" id="liveMpv">—</div>
+        </div>
+        <div class="tile"><div class="label">レップ数</div><div class="value" id="liveReps">0</div></div>
+        <div class="tile"><div class="label">速度低下率</div><div class="value" id="liveLoss">—</div></div>
+        <div class="tile"><div class="label">マーカー検出率</div><div class="value" id="liveTrack">—</div></div>
+      </div>
+      <p class="hint small">ライブ表示は<strong>目安</strong>です。停止すると録画データ全体を解析し、確定値を出します。</p>
+    </div>
+
+    <progress id="prog" value="0" max="1" hidden></progress>
+    <p class="status-line" id="runStatus"></p>
+  </div>
+
+  <div id="results" hidden>
+    <div class="card">
+      <h2>結果</h2>
+      <div class="tiles" id="resultTiles"></div>
+      <div id="chartVel"></div>
+      <div id="chartPow"></div>
+      <div id="chartRep"></div>
+      <h3 class="chart-title" style="margin-top:14px">レップ別の指標</h3>
+      <div class="table-scroll"><table id="repTable"></table></div>
+      <div class="btn-row">
+        <button class="btn primary" id="saveBtn" type="button">この結果を履歴に保存</button>
+        <button class="btn" id="discardBtn" type="button">破棄</button>
+      </div>
+      <p class="status-line" id="saveStatus"></p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================= 履歴タブ ============================= -->
+<section class="panel" id="panel-history" role="tabpanel" aria-labelledby="tab-history" hidden>
+
+  <div class="filter-row">
+    <label class="field">期間
+      <select id="hRange">
+        <option value="0">全期間</option>
+        <option value="30">直近30日</option>
+        <option value="90">直近90日</option>
+        <option value="180">直近180日</option>
+      </select>
+    </label>
+    <label class="field">選手<select id="hAthlete"><option value="">すべて</option></select></label>
+    <label class="field">種目<select id="hExercise"><option value="">すべて</option></select></label>
+    <label class="field">推移の指標
+      <select id="hMetric">
+        <option value="propulsiveVelocity">平均推進速度 (m/s)</option>
+        <option value="peakVelocity">最高速度 (m/s)</option>
+        <option value="meanPower">平均パワー (W)</option>
+        <option value="peakPower">最大パワー (W)</option>
+        <option value="e1rm">推定1RM (kg)</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="tiles" id="historyTiles"></div>
+
+  <div class="card">
+    <div id="chartTrend"></div>
+  </div>
+
+  <div class="card">
+    <div id="chartLV"></div>
+    <p class="hint small" id="lvNote"></p>
+    <details style="margin-top:8px">
+      <summary class="hint" style="cursor:pointer">最小速度閾値（推定1RMの基準）を調整する</summary>
+      <div class="grid" id="mvtGrid" style="margin-top:10px"></div>
+      <p class="hint small">1RMに到達したときのバー速度。文献の代表値を初期値にしていますが個人差が大きいため、実測した1RMに合うよう調整してください。</p>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>記録一覧</h2>
+    <ul class="session-list" id="sessionList"></ul>
+    <div class="btn-row">
+      <button class="btn" id="expJson" type="button">JSONで書き出す</button>
+      <button class="btn" id="expCsv" type="button">CSVで書き出す</button>
+      <button class="btn" id="impBtn" type="button">JSONを読み込む</button>
+      <input type="file" id="impInput" accept="application/json,.json" hidden>
+      <button class="btn danger" id="clearBtn" type="button">すべて削除</button>
+    </div>
+    <p class="hint small">記録はこの端末のブラウザ内にのみ保存されます。チームで共有するときはJSONを書き出して渡し、相手側で読み込んでください。</p>
+  </div>
+</section>
+
+<!-- ============================= 使い方タブ ============================= -->
+<section class="panel" id="panel-guide" role="tabpanel" aria-labelledby="tab-guide" hidden>
+  <div class="card">
+    <h2>カメラでその場撮影する場合</h2>
+    <p class="hint">ブラウザのカメラ機能は <strong>https で開いたときだけ</strong>使えます。ファイルを直接ダブルクリックして開いた場合（<code>file://</code>）は使えないので、GitHub Pages などに公開した URL から開いてください。</p>
+    <ol class="hint" style="padding-left:1.2em">
+      <li>スマホやPCを<strong>三脚・スタンドで固定</strong>してからカメラを開きます。開いたあとに動かすと較正がずれます。</li>
+      <li>バーが可動域いっぱいに動いても画面から出ない画角にします。</li>
+      <li>較正とマーカー指定を済ませてから「録画開始」。撮り終えたら「停止して解析」。</li>
+      <li>録画中に出る速度は<strong>目安</strong>です。停止後に録画全体を解析した値が確定値になります。</li>
+      <li>録画データは端末内にしか残りません。残したい場合は「録画した動画を保存」を押してください。</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>撮影のしかた</h2>
+    <ol class="hint" style="padding-left:1.2em">
+      <li><strong>目印を貼る</strong>：バーの端（プレートの外側の面、またはスリーブ）に蛍光ピンク・蛍光グリーンなど、背景に無い色のテープを3〜5cm四方で貼ります。周囲に同じ色が写っていないことが重要です。</li>
+      <li><strong>カメラは真横から固定</strong>：三脚か床置きで固定します。手持ちで揺れると位置が狂います。バーの高さが動画の縦方向に十分な幅を占めるように引きます。</li>
+      <li><strong>正対させる</strong>：斜めから撮ると実際より短い移動距離になります。バーと平行な向き、カメラ高さはバーの可動域の中央あたりが理想です。</li>
+      <li><strong>60fps以上を推奨</strong>：30fpsでも動きますが、クリーン等の速い種目では60fps以上にしてください。スローモーション撮影の場合はステップ1でスロー倍率を選びます。</li>
+      <li><strong>明るく</strong>：暗いとマーカーの色が沈み、追跡が外れます。</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>指標の意味</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>指標</th><th>意味</th></tr></thead>
+        <tbody>
+          <tr><td>平均推進速度 (MPV)</td><td>挙上開始から、加速度が −9.8 m/s² を下回るまで（＝バーを押し続けている区間）の平均速度。負荷管理で最もよく使われる。</td></tr>
+          <tr><td>平均速度 (MCV)</td><td>挙上局面全体の可動域 ÷ 所要時間。</td></tr>
+          <tr><td>最高速度</td><td>挙上中の速度のピーク。爆発力の指標。</td></tr>
+          <tr><td>平均パワー / 最大パワー</td><td>力（質量 ×（加速度＋重力加速度））× 速度。バー重量のみで計算するため、体重を含めた全身のパワーではない。</td></tr>
+          <tr><td>速度低下率</td><td>セット内の最速レップに対する最終レップの落ち幅。疲労と追い込み度合いの目安。</td></tr>
+          <tr><td>推定1RM</td><td>複数の重量の速度から荷重-速度直線を引き、最小速度閾値に達する重量を外挿した値。<strong>あくまで推定</strong>で、異なる重量のセットが2つ以上必要。</td></tr>
+          <tr><td>左右ブレ</td><td>挙上中のバーの水平方向の振れ幅。フォームの再現性の目安。</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>精度について</h2>
+    <p class="hint">この仕組みは1台のカメラで撮った2次元の映像から縦方向の動きだけを取り出しています。市販の直線位置トランスデューサとは以下の点で条件が異なります。</p>
+    <ul class="hint" style="padding-left:1.2em">
+      <li>カメラが斜めを向いている・レンズ歪みが強い（超広角）と、距離が実際より短く出ます。</li>
+      <li>較正の2点クリックがずれると、速度もパワーも同じ割合でずれます。プレート直径を使う場合は真横から撮った円の直径を測ってください。</li>
+      <li>フレームレートが低いほど最高速度は低めに出ます。同じ条件で撮り続ければ推移の比較には十分使えます。</li>
+      <li>推定1RMは統計モデルによる外挿値です。実測の代わりにはなりません。</li>
+    </ul>
+    <p class="hint"><strong>結論</strong>：絶対値を他人や他機器と比べるのではなく、<strong>同じ撮影条件で自分の推移を追う</strong>使い方が適しています。</p>
+    <p class="hint small">既知の動きの合成動画で計算の正しさを検証できます →
+      <a href="test/selftest.html">セルフテストを実行</a></p>
+  </div>
+
+  <div class="card">
+    <h2>うまく追跡できないとき</h2>
+    <ul class="hint" style="padding-left:1.2em">
+      <li><strong>網かけが背景まで広がる</strong>：彩度の下限を上げる、色相の許容幅を狭める。それでも駄目なら背景に無い色のテープに変える。</li>
+      <li><strong>マーカーが途中で消える</strong>：明度の下限を下げる、探索半径を広げる（詳細設定）。</li>
+      <li><strong>レップ数が合わない</strong>：詳細設定の「速度閾値」「最小可動域」を調整。デッドリフトの引き下ろしを拾ってしまう場合は閾値を上げます。</li>
+      <li><strong>結果が全体的に大きい/小さい</strong>：スケール較正をやり直してください。スロー撮影なのに倍率が1のままだと、速度が倍率ぶん小さく出ます。</li>
+    </ul>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  動画・記録はすべてこの端末内で処理・保存されます。サーバーには何も送信されません。
+</footer>
+
+<video id="videoEl" class="hidden-src" playsinline muted preload="auto"></video>
+
+<!-- ?v= はキャッシュ対策。ファイルを更新したらこの番号を上げること -->
+<script src="js/kinematics.js?v=14"></script>
+<script src="js/tracker.js?v=14"></script>
+<script src="js/charts.js?v=14"></script>
+<script src="js/storage.js?v=14"></script>
+<script src="js/app.js?v=14"></script>
+</body>
+</html>

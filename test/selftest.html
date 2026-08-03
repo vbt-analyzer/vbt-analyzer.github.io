@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>VBT Analyzer セルフテスト</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 20px; font-size: 14px; line-height: 1.6; }
+  table { border-collapse: collapse; margin: 12px 0; }
+  th, td { border: 1px solid #ccc; padding: 4px 10px; text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  .PASS { color: #0a7a0a; font-weight: 700; }
+  .FAIL { color: #c22; font-weight: 700; }
+  h2 { font-size: 15px; margin-top: 22px; }
+  .note { color: #555; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>VBT Analyzer セルフテスト</h1>
+<p class="note">
+既知の運動（正弦波・振幅70px・周期2秒・60fps・バー100kg）で、追跡→速度→パワーの全経路を検証します。<br>
+<strong>A</strong> 運動学のみ ／ <strong>B</strong> 動画ファイルの解析（再生経路） ／
+<strong>C</strong> カメラ録画の解析（MediaRecorder経路） ／ <strong>D</strong> シーク経路（フォールバック）
+</p>
+<div id="out">実行中…</div>
+
+<script src="../js/kinematics.js?v=14"></script>
+<script src="../js/tracker.js?v=14"></script>
+<script src="testdata.js?v=14"></script>
+<script>
+(function () {
+  'use strict';
+  var MPP = 0.005;                        // m/px（較正相当）
+  var AMP_PX = 70, PERIOD = 2, MASS = 100;
+  var AMP_M = AMP_PX * MPP;               // 0.35 m
+  var W = 2 * Math.PI / PERIOD;
+  var EXP_VPEAK = AMP_M * W;              // 1.0996 m/s
+  var EXP_APEAK = AMP_M * W * W;          // 3.4538 m/s²
+  var EXP_ROM = 2 * AMP_M;                // 0.70 m（中央レップ）
+  var EXP_MCV = EXP_ROM / (PERIOD / 2);   // 0.70 m/s
+  // 中央レップでは加速度が -g を下回らないため、推進局面＝レップ全体。よって MPV = MCV。
+  var EXP_MPV = EXP_MCV;
+  var EXP_MPOW = MASS * 9.80665 * EXP_ROM / (PERIOD / 2);  // 686.5 W
+  var EXP_PPOW = (function () {           // P = m(g+a)v の最大値を数値的に求める
+    var best = -Infinity;
+    for (var u = -Math.PI / 2; u <= Math.PI / 2; u += 0.0005) {
+      var p = MASS * (9.80665 - AMP_M * W * W * Math.sin(u)) * (AMP_M * W * Math.cos(u));
+      if (p > best) best = p;
+    }
+    return best;
+  })();
+
+  var rows = [], notes = [];
+  function check(name, got, exp, tolPct, unit) {
+    rows.push({
+      name: name, got: got, exp: exp, tol: tolPct, unit: unit || '',
+      ok: Math.abs(got - exp) <= Math.abs(exp) * tolPct / 100, info: false
+    });
+  }
+  function info(name, got, unit) {
+    rows.push({ name: name, got: got, exp: null, tol: 0, unit: unit || '', ok: true, info: true });
+  }
+  function assert(name, ok, detail) {
+    rows.push({ name: name, got: detail, exp: null, tol: 0, unit: '', ok: ok, info: false });
+  }
+
+  function render(extra) {
+    var html = '<table><thead><tr><th>項目</th><th>実測</th><th>理論値</th><th>許容</th><th>判定</th></tr></thead><tbody>';
+    rows.forEach(function (r) {
+      html += '<tr><td>' + r.name + '</td><td>' +
+        (typeof r.got === 'number' ? r.got.toFixed(4) : r.got) + r.unit + '</td><td>' +
+        (r.exp === null ? '—' : r.exp.toFixed(4) + r.unit) + '</td><td>' +
+        (r.exp === null ? '—' : '±' + r.tol + '%') + '</td><td class="' +
+        (r.info ? '' : (r.ok ? 'PASS' : 'FAIL')) + '">' +
+        (r.info ? '参考' : (r.ok ? 'PASS' : 'FAIL')) + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    var failed = rows.filter(function (r) { return !r.ok; }).length;
+    html += '<h2>総合: <span class="' + (failed ? 'FAIL' : 'PASS') + '">' +
+      (failed ? failed + '件 FAIL' : '全' + rows.filter(function (r) { return !r.info; }).length + '件 PASS') +
+      '</span></h2>';
+    document.getElementById('out').innerHTML = html +
+      notes.map(function (n) { return '<p class="note">' + n + '</p>'; }).join('') + (extra || '');
+  }
+
+  var kinOpts = {
+    metersPerPixel: MPP, slowFactor: 1, smoothWindow: 0.08,
+    velThreshold: 0.15, minRom: 0.12, minDuration: 0.15, mergeGap: 0.10,
+    loadKg: MASS, extraKg: 0
+  };
+
+  /* 共通の検証。
+   * tolPeak はピーク系の許容幅（実効フレームレートに左右されるため経路ごとに変える）。
+   * 最大パワーは「速度 × 力」で、力は加速度＝位置の2階微分に由来する。
+   * 誤差が二重に乗るため、フレームレートが低い経路では合否判定せず参考値として出す。 */
+  function verify(tag, res, tolAmp, tolRom, tolPow, tolPeak, trustPeakPower) {
+    var pos = res.series.map(function (p) { return p.pos; });
+    check(tag + '. 位置の振幅',
+      (Math.max.apply(null, pos) - Math.min.apply(null, pos)) / 2, AMP_M, tolAmp, ' m');
+    check(tag + '. レップ数', res.metrics.length, 3, 0, ' 本');
+
+    // 定義上の不変条件：平均推進速度がそのレップの最高速度を超えることはない
+    var bad = res.metrics.filter(function (m) { return m.propulsiveVelocity > m.peakVelocity + 1e-9; });
+    assert(tag + '. MPV ≤ 最高速度（全レップ）', bad.length === 0,
+      bad.length ? bad.length + '本が違反' : res.metrics.length + '本すべて満たす');
+
+    var mid = res.metrics[1];
+    if (!mid) return;
+    check(tag + '. 中央レップのROM', mid.rom, EXP_ROM, tolRom, ' m');
+    check(tag + '. 中央レップの平均速度', mid.meanVelocity, EXP_MCV, tolRom, ' m/s');
+    check(tag + '. 中央レップの平均推進速度', mid.propulsiveVelocity, EXP_MPV, tolRom + 2, ' m/s');
+    check(tag + '. 中央レップの平均パワー', mid.meanPower, EXP_MPOW, tolPow, ' W');
+    check(tag + '. 中央レップの最高速度', mid.peakVelocity, EXP_VPEAK, tolPeak, ' m/s');
+    if (trustPeakPower) check(tag + '. 中央レップの最大パワー', mid.peakPower, EXP_PPOW, tolPeak + 5, ' W');
+    else info(tag + '. 中央レップの最大パワー（低fpsのため参考）', mid.peakPower, ' W');
+  }
+
+  function effectiveFps(samples) {
+    var dts = [];
+    for (var i = 1; i < samples.length; i++) {
+      var d = samples[i].t - samples[i - 1].t;
+      if (d > 1e-4) dts.push(d);
+    }
+    if (!dts.length) return 0;
+    dts.sort(function (a, b) { return a - b; });
+    return 1 / dts[Math.floor(dts.length / 2)];
+  }
+
+  function detectionRate(samples) {
+    if (!samples.length) return 0;
+    var ok = 0;
+    for (var i = 0; i < samples.length; i++) if (samples[i].ok) ok++;
+    return ok / samples.length * 100;
+  }
+
+  /* ================= A: 運動学のみ（理想サンプル・環境に左右されない） ================= */
+  var ideal = [];
+  for (var i = 0; i < 240; i++) {
+    ideal.push({ t: i / 60, x: 160, y: 125 - AMP_PX * Math.sin(W * i / 60), ok: true });
+  }
+  var A = VBT.Kin.analyze(ideal, kinOpts);
+  check('A. 最大加速度', Math.max.apply(null, A.series.map(function (p) { return Math.abs(p.acc); })),
+    EXP_APEAK, 5, ' m/s²');
+  verify('A', A, 1, 3, 3, 3, true);
+  render('<p>テストB（動画ファイルの解析）を実行中…</p>');
+
+  /* ================= B: 動画ファイル（再生経路） ================= */
+  function b64ToBlob(b64, type) {
+    var bin = atob(b64), arr = new Uint8Array(bin.length);
+    for (var k = 0; k < bin.length; k++) arr[k] = bin.charCodeAt(k);
+    return new Blob([arr], { type: type });
+  }
+  function hiddenVideo() {
+    var el = document.createElement('video');
+    el.muted = true; el.playsInline = true; el.preload = 'auto';
+    el.style.cssText = 'position:fixed;left:-9999px;width:2px;height:2px;opacity:0';
+    document.body.appendChild(el);
+    return el;
+  }
+  var BASE_CFG = {
+    hue: 309, hueTol: 30, satMin: 0.35, valMin: 0.20,
+    procWidth: 320, searchRadius: 90, minPixels: 8, playbackRate: 1
+  };
+  function cfgWith(extra) {
+    var c = {};
+    Object.keys(BASE_CFG).forEach(function (k) { c[k] = BASE_CFG[k]; });
+    Object.keys(extra || {}).forEach(function (k) { c[k] = extra[k]; });
+    return c;
+  }
+
+  var v = hiddenVideo();
+  v.src = URL.createObjectURL(b64ToBlob(window.TEST_VIDEO_B64, 'video/mp4'));
+
+  v.addEventListener('loadedmetadata', function () {
+    var t0 = performance.now();
+    VBT.Tracker.track(v, cfgWith({}), null, null).then(function (samples) {
+      var secs = (performance.now() - t0) / 1000;
+      var fps = effectiveFps(samples);
+      check('B. 検出率', detectionRate(samples), 100, 2, ' %');
+      // 実効フレームレートは端末の負荷次第で下がる。コード側では制御できないため参考値。
+      info('B. 実効フレームレート', fps, ' fps');
+      // ピーク系は取り込めたフレーム数に左右されるため、許容幅を広めに取る。
+      verify('B', VBT.Kin.analyze(samples, kinOpts), 3, 4, 6, fps >= 50 ? 12 : 22, fps >= 50);
+      notes.push('テストB: ' + samples.length + 'フレームを ' + secs.toFixed(1) + '秒で処理（実効 ' +
+        fps.toFixed(0) + 'fps）。60fpsを大きく下回る場合は端末の負荷が高く、ピーク系の値が上振れします。');
+      render('<p>テストC（カメラ録画の解析）を実行中…</p>');
+      return runRecordingTest();
+    }).catch(function (e) {
+      render('<p class="FAIL">テストBが失敗: ' + e.message + '</p>');
+    });
+  });
+  v.addEventListener('error', function () {
+    render('<p class="FAIL">テスト動画を読み込めませんでした。</p>');
+  });
+
+  /* ================= C: カメラ録画経路 =================
+   * テスト動画の再生を captureStream で拾い、MediaRecorder で録画する。
+   * カメラ利用時に通るのと同じ経路（録画Blob → 長さの確定 → 追跡 → 運動学）。
+   * 描画をメインスレッドで回さないため、端末が重くても映像が止まらない。 */
+  function runRecordingTest() {
+    var canCapture = !!(v.captureStream || v.mozCaptureStream) && !!window.MediaRecorder;
+    if (!canCapture) {
+      info('C. 録画経路', 'このブラウザでは検証できないため省略');
+      render('<p>テストD（シーク経路）を実行中…</p>');
+      return runSeekPathTest();
+    }
+    var stream = v.captureStream ? v.captureStream() : v.mozCaptureStream();
+    var mime = ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
+      .filter(function (m) { return MediaRecorder.isTypeSupported(m); })[0] || '';
+    var mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    var chunks = [];
+    mr.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+
+    return new Promise(function (resolve) {
+      mr.onstop = function () {
+        v.pause();
+        var blob = new Blob(chunks, { type: mr.mimeType || 'video/webm' });
+        var v2 = hiddenVideo();
+        v2.src = URL.createObjectURL(blob);
+        v2.addEventListener('loadedmetadata', function () {
+          var rawDur = v2.duration;
+          VBT.Tracker.ensureDuration(v2).then(function (dur) {
+            check('C. 録画の長さを確定できた', isFinite(dur) && dur > 0 ? dur : 0, 4, 25, ' 秒');
+            return VBT.Tracker.track(v2, cfgWith({}), null, null).then(function (s2) {
+              var fps = effectiveFps(s2);
+              check('C. 検出率', detectionRate(s2), 100, 3, ' %');
+              info('C. 実効フレームレート', fps, ' fps');
+              // 録画は「再生されている映像を撮り直す」ため、元動画より実効フレーム数が
+              // さらに減りうる。ピーク系はフレーム数に強く依存するので許容幅を広く取る。
+              verify('C', VBT.Kin.analyze(s2, kinOpts), 5, 6, 10, fps >= 50 ? 15 : 35, fps >= 50);
+              notes.push('テストC: 録画形式 ' + (mr.mimeType || '不明') + ' / ' +
+                (blob.size / 1024).toFixed(0) + 'KB。読み込み直後の duration は ' +
+                (isFinite(rawDur) ? rawDur.toFixed(2) + '秒' : 'Infinity（確定処理が必要）') + '。');
+              render('<p>テストD（シーク経路）を実行中…</p>');
+              resolve(runSeekPathTest());
+            });
+          }).catch(function (e) {
+            render('<p class="FAIL">テストCが失敗: ' + e.message + '</p>');
+            resolve();
+          });
+        });
+      };
+      v.currentTime = 0;
+      v.play().then(function () {
+        mr.start();
+        v.addEventListener('ended', function () { if (mr.state !== 'inactive') mr.stop(); }, { once: true });
+        setTimeout(function () { if (mr.state !== 'inactive') mr.stop(); }, 7000);
+      }, function () {
+        info('C. 録画経路', '再生できないため省略');
+        render('<p>テストD（シーク経路）を実行中…</p>');
+        resolve(runSeekPathTest());
+      });
+    });
+  }
+
+  /* ================= D: シーク経路（フォールバック） ================= */
+  function runSeekPathTest() {
+    var t0 = performance.now();
+    return VBT.Tracker.track(v, cfgWith({ forceSeek: true, seekFps: 30 }), null, null).then(function (s) {
+      var secs = (performance.now() - t0) / 1000;
+      check('D. 検出率', detectionRate(s), 100, 3, ' %');
+      check('D. 処理時間（4秒の動画）', secs, 20, 100, ' 秒');
+      verify('D', VBT.Kin.analyze(s, kinOpts), 4, 5, 8, 25, effectiveFps(s) >= 50);
+      notes.push('テストD: シーク経路は ' + s.length + 'フレームを ' + secs.toFixed(1) +
+        '秒で処理。再生経路が使えないブラウザ・状況でのみ使われます。');
+      render('');
+    }).catch(function (e) {
+      render('<p class="FAIL">テストDが失敗: ' + e.message + '</p>');
+    });
+  }
+})();
+</script>
+</body>
+</html>
