@@ -924,8 +924,9 @@
       var b = sum.best;
       $('bestGroupTitle').textContent =
         '最速レップ（' + sum.bestRep + '本目・疲労前の実力）';
-      bestT.appendChild(tile('平均推進速度', fmt(b.propulsiveVelocity, 2), ' m/s'));
+      bestT.appendChild(tile('速度 MPV', fmt(b.propulsiveVelocity, 2), ' m/s'));
       bestT.appendChild(tile('最高速度（瞬間）', fmt(b.peakVelocity, 2), ' m/s'));
+      bestT.appendChild(tile('パワー', fmt(b.propulsivePower, 0), ' W'));
       bestT.appendChild(tile('最大パワー（瞬間）', fmt(b.peakPower, 0), ' W'));
       bestT.appendChild(tile('最終レップとの差', fmt(sum.bestVelocity - sum.lastVelocity, 2), ' m/s'));
 
@@ -973,31 +974,84 @@
     $('pathToggle').textContent = '軌跡を表示';
     $('pathStatus').textContent = '';
 
-    var head = ['レップ', '開始(秒)', '可動域(cm)', '所要(秒)', '平均推進速度(m/s)',
-      '平均速度(m/s)', '最高速度(m/s)', '平均力(N)', '平均パワー(W)', '最大パワー(W)', '左右ブレ(cm)'];
+    renderRepTable(m);
+  }
+
+  /* レップ別の表。速度とパワーを先頭に置き、各列の最大を強調し、
+   * 最下段に平均の行を出す。強調は色だけに頼らず太字と印も併用する。 */
+  var REP_COLS = [
+    { h: '速度 MPV', unit: 'm/s', key: 'propulsiveVelocity', d: 2, hi: true },
+    { h: '最高速度', unit: 'm/s', key: 'peakVelocity', d: 2, hi: true },
+    { h: 'パワー', unit: 'W', key: 'propulsivePower', d: 0, hi: true },
+    { h: '最大パワー', unit: 'W', key: 'peakPower', d: 0, hi: true },
+    { h: '可動域', unit: 'cm', key: 'rom', d: 1, scale: 100 },
+    { h: '所要', unit: '秒', key: 'duration', d: 2 },
+    { h: '平均力', unit: 'N', key: 'meanForce', d: 0 },
+    { h: '左右ブレ', unit: 'cm', key: 'barPathDeviation', d: 1, scale: 100 }
+  ];
+
+  function renderRepTable(m) {
     var tbl = $('repTable');
     tbl.textContent = '';
-    var thead = document.createElement('thead'), tr = document.createElement('tr');
-    head.forEach(function (h) { var th = document.createElement('th'); th.textContent = h; tr.appendChild(th); });
-    thead.appendChild(tr); tbl.appendChild(thead);
+    if (!m.length) return;
+
+    var thead = document.createElement('thead'), htr = document.createElement('tr');
+    var first = document.createElement('th');
+    first.textContent = 'レップ';
+    htr.appendChild(first);
+    REP_COLS.forEach(function (c) {
+      var th = document.createElement('th');
+      th.textContent = c.h + ' (' + c.unit + ')';
+      htr.appendChild(th);
+    });
+    thead.appendChild(htr); tbl.appendChild(thead);
+
+    // 各列の最大値がどのレップかを先に求める
+    var maxIdx = REP_COLS.map(function (c) {
+      if (!c.hi) return -1;
+      var k = 0;
+      for (var i = 1; i < m.length; i++) if (m[i][c.key] > m[k][c.key]) k = i;
+      return k;
+    });
+
     var tb = document.createElement('tbody');
     m.forEach(function (x, i) {
       var row = document.createElement('tr');
-      [i + 1, fmt(x.startT, 2), fmt(x.rom * 100, 1), fmt(x.duration, 2),
-        fmt(x.propulsiveVelocity, 2), fmt(x.meanVelocity, 2), fmt(x.peakVelocity, 2),
-        fmt(x.meanForce, 0), fmt(x.meanPower, 0), fmt(x.peakPower, 0),
-        fmt(x.barPathDeviation * 100, 1)
-      ].forEach(function (c) { var td = document.createElement('td'); td.textContent = c; row.appendChild(td); });
+      var th = document.createElement('td');
+      th.textContent = String(i + 1);
+      row.appendChild(th);
+      REP_COLS.forEach(function (c, ci) {
+        var td = document.createElement('td');
+        td.textContent = fmt(x[c.key] * (c.scale || 1), c.d);
+        if (maxIdx[ci] === i && m.length > 1) {
+          td.className = 'is-max';
+          td.title = 'このセットの最大';
+        }
+        row.appendChild(td);
+      });
       tb.appendChild(row);
     });
     tbl.appendChild(tb);
+
+    var tfoot = document.createElement('tfoot'), ftr = document.createElement('tr');
+    var flabel = document.createElement('td');
+    flabel.textContent = '平均';
+    ftr.appendChild(flabel);
+    REP_COLS.forEach(function (c) {
+      var td = document.createElement('td');
+      var avg = m.reduce(function (a, x) { return a + x[c.key]; }, 0) / m.length;
+      td.textContent = fmt(avg * (c.scale || 1), c.d);
+      ftr.appendChild(td);
+    });
+    tfoot.appendChild(ftr); tbl.appendChild(tfoot);
   }
+
 
   /* ---------- レップ別チャート（見る指標を切り替えられる） ---------- */
   var REP_METRICS = {
     propulsiveVelocity: ['平均推進速度', ' m/s', 2, 1, '押し続けている区間の平均。負荷管理の基準になる値'],
     peakVelocity: ['最高速度', ' m/s', 2, 1, '瞬間の最大。爆発力の目安だが、撮影fpsの影響を受けやすい'],
-    meanPower: ['平均パワー', ' W', 0, 1, '挙上局面の平均。バー重量だけで計算している'],
+    propulsivePower: ['パワー', ' W', 0, 1, 'MPVと同じ推進局面での平均。バー重量だけで計算している'],
     peakPower: ['最大パワー', ' W', 0, 1, '瞬間の最大。こちらも撮影fpsの影響を受けやすい'],
     rom: ['可動域', ' cm', 1, 100, 'レップごとの動作範囲。疲れると狭くなりやすい']
   };
@@ -1154,6 +1208,24 @@
       slowFactor: r.slowFactor,
       metersPerPixel: S.metersPerPixel,
       trackRate: r.trackRate,
+      // 長期の推移用に、セット単位の平均・最速・最大をそのまま持たせておく
+      summary: (function () {
+        var s = Kin.setSummary(r.out.metrics);
+        if (!s) return null;
+        function rd(v, d) { return Math.round(v * Math.pow(10, d)) / Math.pow(10, d); }
+        return {
+          reps: s.reps,
+          meanVelocity: rd(s.meanVelocity, 4),
+          bestVelocity: rd(s.bestVelocity, 4),
+          lastVelocity: rd(s.lastVelocity, 4),
+          velocityLoss: rd(s.velocityLoss, 2),
+          meanPower: rd(s.meanPower, 1),
+          peakPower: rd(s.peakPower, 1),
+          bestRep: s.bestRep,
+          peakPowerRep: s.peakPowerRep,
+          meanRom: rd(s.meanRom, 4)
+        };
+      })(),
       reps: r.out.metrics.map(function (x) {
         var o = {};
         Object.keys(x).forEach(function (k) {
@@ -1593,6 +1665,14 @@
     return Math.max.apply(null, rec.reps.map(function (x) { return x[key]; }));
   }
 
+  /* セット単位の要約。保存済みならそれを使い、
+   * 要約を持たない古い記録はレップから計算し直す。 */
+  function summaryOf(rec) {
+    if (rec.summary) return rec.summary;
+    if (!rec.reps || !rec.reps.length) return null;
+    return Kin.setSummary(rec.reps);
+  }
+
   // 選手のプルダウンは値がID・表示が名前なので、汎用の fillSelect とは別に組む
   function fillAthleteFilter() {
     var sel = $('hAthlete');
@@ -1633,7 +1713,8 @@
     if (exSel) {
       mvt = Store.mvtFor(exSel);
       lvPoints = list.map(function (r) {
-        return { load: r.loadKg, velocity: bestOf(r, 'propulsiveVelocity'), rec: r };
+        var s = summaryOf(r);
+        return { load: r.loadKg, velocity: s && s.bestVelocity, rec: r };
       }).filter(function (p) { return p.velocity != null && p.load > 0; });
       profile = Kin.loadVelocityProfile(lvPoints, mvt);
     }
@@ -1642,8 +1723,8 @@
     var tl = $('historyTiles');
     tl.textContent = '';
     var totalReps = list.reduce(function (a, r) { return a + (r.reps ? r.reps.length : 0); }, 0);
-    var bestV = list.length ? Math.max.apply(null, list.map(function (r) { return bestOf(r, 'propulsiveVelocity') || 0; })) : 0;
-    var bestP = list.length ? Math.max.apply(null, list.map(function (r) { return bestOf(r, 'peakPower') || 0; })) : 0;
+    var bestV = list.length ? Math.max.apply(null, list.map(function (r) { var s = summaryOf(r); return (s && s.bestVelocity) || 0; })) : 0;
+    var bestP = list.length ? Math.max.apply(null, list.map(function (r) { var s = summaryOf(r); return (s && s.peakPower) || 0; })) : 0;
     if (profile && profile.e1rm) {
       tl.appendChild(tile('推定1RM', fmt(profile.e1rm, 1), ' kg', true));
     } else {
@@ -1679,8 +1760,13 @@
         + (r.athlete ? '　' + r.athlete : '');
       var s = document.createElement('div');
       s.className = 'sess-sub';
-      s.textContent = '最高MPV ' + fmt(bestOf(r, 'propulsiveVelocity'), 2) + ' m/s'
-        + '　最大パワー ' + fmt(bestOf(r, 'peakPower'), 0) + ' W'
+      var rs = summaryOf(r);
+      s.textContent = (rs
+        ? '平均 ' + fmt(rs.meanVelocity, 2) + ' m/s'
+          + '　最速 ' + fmt(rs.bestVelocity, 2) + ' m/s'
+          + '　平均パワー ' + fmt(rs.meanPower, 0) + ' W'
+          + '　最大パワー ' + fmt(rs.peakPower, 0) + ' W'
+        : '')
         + (r.trackRate != null ? '　検出率 ' + (r.trackRate * 100).toFixed(0) + '%' : '')
         + (r.note ? '　' + r.note : '');
       main.appendChild(t); main.appendChild(s);
@@ -1711,25 +1797,25 @@
   function renderTrend(list, metric, profile, mvt) {
     var isE1rm = metric === 'e1rm';
     var unitMap = {
-      propulsiveVelocity: [' m/s', 2, '平均推進速度'],
-      peakVelocity: [' m/s', 2, '最高速度'],
-      meanPower: [' W', 0, '平均パワー'],
-      peakPower: [' W', 0, '最大パワー'],
+      meanVelocity: [' m/s', 2, 'セット平均 速度'],
+      bestVelocity: [' m/s', 2, '最速レップの速度'],
+      meanPower: [' W', 0, 'セット平均 パワー'],
+      peakPower: [' W', 0, '最大パワー（瞬間）'],
+      velocityLoss: [' %', 1, '速度低下率'],
       e1rm: [' kg', 1, '推定1RM']
     };
-    var info = unitMap[metric];
+    var info = unitMap[metric] || unitMap.meanVelocity;
 
     // 種目ごと × 日ごとに最良値を集計（同日に複数セットあれば最良を採る）
     var byEx = {};
     list.forEach(function (r) {
-      var v;
+      var v, s = summaryOf(r);
+      if (!s) return;
       if (isE1rm) {
         if (!profile || !profile.slope || profile.slope >= -1e-6) return;
-        var best = bestOf(r, 'propulsiveVelocity');
-        if (best == null) return;
-        v = r.loadKg + (best - mvt) / (-profile.slope);
+        v = r.loadKg + (s.bestVelocity - mvt) / (-profile.slope);
       } else {
-        v = bestOf(r, metric);
+        v = s[metric];
       }
       if (v == null || !isFinite(v)) return;
       var k = r.exercise;
@@ -1764,7 +1850,7 @@
 
     var sub = isE1rm
       ? '荷重-速度直線の傾きから各セットを1RM換算した推定値（種目を1つ選ぶと算出できます）'
-      : 'セットごとの最良値を日ごとにまとめたもの';
+      : 'セットごとの値を、日ごとに最大のもので代表させたもの';
     if (capped) sub += '　※セット数の多い上位3種目のみ表示';
 
     // 日付軸の目盛りは実際に記録がある日から等間隔に選ぶ（丸め数値では日付にならないため）

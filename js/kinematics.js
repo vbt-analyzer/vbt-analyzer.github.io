@@ -249,7 +249,7 @@
     if (propEnd < s + 1) propEnd = Math.min(e, s + 1);
 
     var powSum = 0, forceSum = 0, velSum = 0, wsum = 0;
-    var propVelSum = 0, propW = 0;
+    var propVelSum = 0, propPowSum = 0, propForceSum = 0, propW = 0;
     var vArr = [], fArr = [], pArr = [], tArr = [];
 
     for (i = s; i <= e; i++) {
@@ -264,7 +264,7 @@
       if (i > s) dt += (series[i].t - series[i - 1].t) / 2;
       if (i < e) dt += (series[i + 1].t - series[i].t) / 2;
       powSum += p * dt; forceSum += f * dt; velSum += v * dt; wsum += dt;
-      if (i <= propEnd) { propVelSum += v * dt; propW += dt; }
+      if (i <= propEnd) { propVelSum += v * dt; propPowSum += p * dt; propForceSum += f * dt; propW += dt; }
     }
 
     // ピーク値は単発のノイズを拾いやすいので、3点移動平均から取る。
@@ -290,6 +290,13 @@
       propulsiveVelocity: mpv,
       peakVelocity: peakVel,
       peakVelocityT: peakVelT,
+      /* 速度をMPV（推進局面の平均）で見るなら、パワーも同じ区間で平均しないと
+       * 区間が食い違う。propulsivePower がその値（平均推進パワー）。
+       * 「平均力 × MPV」では平均の積になってしまい、力と速度が相関する以上
+       * 積の平均とは一致しないので、時間平均をそのまま取る。 */
+      propulsivePower: propW > 0 ? propPowSum / propW : (wsum > 0 ? powSum / wsum : 0),
+      propulsiveForce: propW > 0 ? propForceSum / propW : 0,
+      propulsiveDuration: propW,
       meanForce: wsum > 0 ? forceSum / wsum : 0,
       peakForce: peakForce,
       meanPower: wsum > 0 ? powSum / wsum : 0,
@@ -356,8 +363,9 @@
       lastVelocity: metrics[n - 1].propulsiveVelocity,
       slowestVelocity: metrics[worstIdx].propulsiveVelocity,
       velocityLoss: velocityLoss(metrics),
-      meanPower: mean('meanPower'),
-      bestMeanPower: Math.max.apply(null, metrics.map(function (x) { return x.meanPower; })),
+      meanPower: mean('propulsivePower'),          // 速度(MPV)と同じ区間で揃えた平均
+      meanConcentricPower: mean('meanPower'),      // 参考: 挙上局面まるごとの平均
+      bestMeanPower: Math.max.apply(null, metrics.map(function (x) { return x.propulsivePower; })),
       peakPower: Math.max.apply(null, metrics.map(function (x) { return x.peakPower; })),
       meanRom: mean('rom'),
       totalTime: metrics[n - 1].endT - metrics[0].startT

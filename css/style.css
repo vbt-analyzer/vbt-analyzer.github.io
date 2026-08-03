@@ -285,6 +285,16 @@ th, td {
 th { color: var(--text-secondary); font-weight: 600; }
 th:first-child, td:first-child { text-align: left; font-variant-numeric: normal; }
 
+/* 各列の最大。色だけに頼らないよう、太字と印も併用する */
+td.is-max { color: var(--accent); font-weight: 700; }
+td.is-max::after { content: " ▲"; font-size: 9px; vertical-align: 2px; }
+
+tfoot td {
+  border-top: 2px solid var(--axis); border-bottom: 0;
+  font-weight: 650; color: var(--text-primary);
+}
+tfoot td:first-child { color: var(--text-secondary); font-weight: 600; }
+
 /* ---------- 履歴 ---------- */
 .filter-row {
   display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;

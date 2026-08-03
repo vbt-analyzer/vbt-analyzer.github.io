@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VBT Analyzer — 挙上速度・パワー解析</title>
 <meta name="description" content="ウエイトトレーニングの動画から挙上速度とパワーを算出し、推移をグラフ化する。ブラウザだけで動作し、動画は端末外に送信しない。">
-<link rel="stylesheet" href="css/style.css?v=21">
+<link rel="stylesheet" href="css/style.css?v=22">
 
 <!-- PWA（ホーム画面に追加してアプリのように使う） -->
 <link rel="manifest" href="manifest.webmanifest">
@@ -239,7 +239,7 @@
         <select id="repMetric">
           <option value="propulsiveVelocity">平均推進速度 (m/s)</option>
           <option value="peakVelocity">最高速度 (m/s)</option>
-          <option value="meanPower">平均パワー (W)</option>
+          <option value="propulsivePower">パワー (W)</option>
           <option value="peakPower">最大パワー (W)</option>
           <option value="rom">可動域 (cm)</option>
         </select>
@@ -288,10 +288,11 @@
     <label class="field">種目<select id="hExercise"><option value="">すべて</option></select></label>
     <label class="field">推移の指標
       <select id="hMetric">
-        <option value="propulsiveVelocity">平均推進速度 (m/s)</option>
-        <option value="peakVelocity">最高速度 (m/s)</option>
-        <option value="meanPower">平均パワー (W)</option>
-        <option value="peakPower">最大パワー (W)</option>
+        <option value="meanVelocity">セット平均 速度 (m/s)</option>
+        <option value="bestVelocity">最速レップの速度 (m/s)</option>
+        <option value="meanPower">セット平均 パワー (W)</option>
+        <option value="peakPower">最大パワー・瞬間 (W)</option>
+        <option value="velocityLoss">速度低下率 (%)</option>
         <option value="e1rm">推定1RM (kg)</option>
       </select>
     </label>
@@ -553,10 +554,10 @@
 </div>
 
 <!-- ?v= はキャッシュ対策。ファイルを更新したらこの番号を上げること -->
-<script src="js/kinematics.js?v=21"></script>
-<script src="js/tracker.js?v=21"></script>
-<script src="js/charts.js?v=21"></script>
-<script src="js/storage.js?v=21"></script>
-<script src="js/app.js?v=21"></script>
+<script src="js/kinematics.js?v=22"></script>
+<script src="js/tracker.js?v=22"></script>
+<script src="js/charts.js?v=22"></script>
+<script src="js/storage.js?v=22"></script>
+<script src="js/app.js?v=22"></script>
 </body>
 </html>

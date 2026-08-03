@@ -378,10 +378,16 @@
     ['date', '日付'], ['athlete', '選手'], ['grade', '学年'], ['sex', '性別'],
     ['exercise', '種目'], ['loadKg', '重量kg'],
     ['extraKg', '追加質量kg'], ['repNo', 'レップ'], ['rom', 'ROM_m'], ['duration', '所要秒'],
-    ['meanVelocity', '平均速度_m/s'], ['propulsiveVelocity', '平均推進速度_m/s'],
+    ['meanVelocity', '平均速度MCV_m/s'], ['propulsiveVelocity', '平均推進速度MPV_m/s'],
     ['peakVelocity', '最高速度_m/s'], ['meanForce', '平均力_N'], ['peakForce', '最大力_N'],
-    ['meanPower', '平均パワー_W'], ['peakPower', '最大パワー_W'],
-    ['barPathDeviation', '左右ブレ_m'], ['note', 'メモ']
+    ['propulsivePower', 'パワー推進局面_W'], ['meanPower', '平均パワー挙上全体_W'],
+    ['peakPower', '最大パワー_W'],
+    ['barPathDeviation', '左右ブレ_m'],
+    // 以下はセット単位の値。全行に同じ値が入る（表計算でそのまま集計できるように）
+    ['set_meanVelocity', 'セット平均速度_m/s'], ['set_bestVelocity', 'セット最速レップ速度_m/s'],
+    ['set_meanPower', 'セット平均パワー_W'], ['set_peakPower', 'セット最大パワー_W'],
+    ['set_velocityLoss', 'セット速度低下率_%'],
+    ['note', 'メモ']
   ];
 
   function exportCSV(athleteId) {
@@ -390,12 +396,17 @@
     var rows = [CSV_COLS.map(function (c) { return c[1]; })];
     ownRecords(athleteId).forEach(function (r) {
       var prof = a;
+      var sm = r.summary || (global.VBT.Kin && r.reps ? global.VBT.Kin.setSummary(r.reps) : null) || {};
       (r.reps || []).forEach(function (m, i) {
         rows.push(CSV_COLS.map(function (c) {
           var k = c[0];
           if (k === 'repNo') return i + 1;
           if (k === 'grade') return prof.grade || '';
           if (k === 'sex') return prof.sex || '';
+          if (k.indexOf('set_') === 0) {
+            var sv = sm[k.slice(4)];
+            return sv == null ? '' : Math.round(sv * 10000) / 10000;
+          }
           if (k in r) return r[k] == null ? '' : r[k];
           var v = m[k];
           return v == null ? '' : (typeof v === 'number' ? Math.round(v * 10000) / 10000 : v);
