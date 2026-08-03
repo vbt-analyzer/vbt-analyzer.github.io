@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VBT Analyzer — 挙上速度・パワー解析</title>
 <meta name="description" content="ウエイトトレーニングの動画から挙上速度とパワーを算出し、推移をグラフ化する。ブラウザだけで動作し、動画は端末外に送信しない。">
-<link rel="stylesheet" href="css/style.css?v=17">
+<link rel="stylesheet" href="css/style.css?v=18">
 
 <!-- PWA（ホーム画面に追加してアプリのように使う） -->
 <link rel="manifest" href="manifest.webmanifest">
@@ -288,15 +288,54 @@
     <h2>記録一覧</h2>
     <ul class="session-list" id="sessionList"></ul>
     <div class="btn-row">
-      <button class="btn" id="expJson" type="button">JSONで書き出す</button>
-      <button class="btn" id="expCsv" type="button">CSVで書き出す</button>
+      <button class="btn" id="expCsv" type="button">自分の記録をCSVで書き出す</button>
+      <button class="btn" id="expJson" type="button">自分の記録をJSONで書き出す</button>
       <button class="btn" id="impBtn" type="button">JSONを読み込む</button>
       <input type="file" id="impInput" accept="application/json,.json" hidden>
-      <button class="btn danger" id="clearBtn" type="button">すべて削除</button>
+      <button class="btn danger" id="clearBtn" type="button">この端末の記録をすべて削除</button>
     </div>
-    <p class="hint small">記録はこの端末のブラウザ内にのみ保存されます。チームで共有するときはJSONを書き出して渡し、相手側で読み込んでください。</p>
+    <p class="status-line" id="ioStatus"></p>
+    <p class="hint small">書き出せるのは<strong>いま選ばれている選手の分だけ</strong>です。他の人の記録は含まれません。
+      チームで比べたいときは、各自が書き出したファイルを持ち寄ってください。
+      記録はこの端末のブラウザ内にのみ保存されます。</p>
+  </div>
+
+  <div class="card">
+    <h2>この端末の管理</h2>
+    <p class="hint">部内の共用タブレット等で使う場合、<strong>管理PIN</strong>を設定しておくと、
+      他人のPINのリセット・名簿からの削除・記録の一括削除・データの読み込みに管理PINが必要になります。
+      設定しなければ、それらは確認だけで実行できます。</p>
+    <div class="btn-row" style="margin-top:0">
+      <button class="btn" id="adminPinBtn" type="button">管理PINを設定する</button>
+    </div>
+    <p class="status-line" id="adminStatus"></p>
   </div>
 </section>
+
+<!-- ============================= 管理PIN ============================= -->
+<div class="modal" id="adminModal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="apTitle">
+    <h2 id="apTitle">管理PIN</h2>
+    <p class="hint" id="apHint"></p>
+    <label class="field" id="apOldWrap">いまの管理PIN
+      <input type="password" id="apOld" inputmode="numeric" autocomplete="off" maxlength="4" placeholder="••••">
+    </label>
+    <div class="grid" style="margin-top:10px">
+      <label class="field">新しい管理PIN（数字4桁）
+        <input type="password" id="apNew" inputmode="numeric" autocomplete="off" maxlength="4" placeholder="••••">
+      </label>
+      <label class="field">確認
+        <input type="password" id="apNew2" inputmode="numeric" autocomplete="off" maxlength="4" placeholder="••••">
+      </label>
+    </div>
+    <p class="hint small">空欄のまま保存すると、管理PINを解除します。</p>
+    <p class="status-line bad" id="apError" hidden></p>
+    <div class="btn-row">
+      <button class="btn primary" id="apSave" type="button">保存</button>
+      <button class="btn" id="apCancel" type="button">やめる</button>
+    </div>
+  </div>
+</div>
 
 <!-- ============================= 使い方タブ ============================= -->
 <section class="panel" id="panel-guide" role="tabpanel" aria-labelledby="tab-guide" hidden>
@@ -370,10 +409,29 @@
     <h2>選手の登録について</h2>
     <p class="hint">記録を誰のものか区別するために、<strong>初めて使う人だけ</strong>名前・学年・性別を登録します。2回目以降はプルダウンから自分を選ぶだけです。</p>
     <ul class="hint" style="padding-left:1.2em">
+      <li>登録時に<strong>数字4桁のPIN</strong>を決めます。他の人が自分の名前で記録できないようにするためのものです。
+        <strong>ほかで使っているパスワードは使わないでください</strong></li>
+      <li>「この端末では次回からPINを聞かない」は、<strong>自分のスマホならオン、共用のタブレットならオフ</strong>にします</li>
       <li>登録した内容は<strong>この端末のブラウザ内だけ</strong>に保存されます。別の端末で使うときは、その端末でもう一度登録が必要です</li>
-      <li>共用のタブレット等で複数人が使う場合は、<strong>記録の前に画面右上の名前が自分になっているか</strong>を必ず確認してください</li>
       <li>学年が上がったら「選んだ人の情報を直す」から変更できます。過去の記録は消えません</li>
       <li>性別は「回答しない」を選べます。絞り込みに使わないだけで、記録の中身は変わりません</li>
+      <li>PINを忘れたら、PIN入力画面の「PINを忘れた」から再設定できます（管理PINが設定されていればその入力が必要です）</li>
+    </ul>
+    <p class="hint"><strong>PINの限界について正直に書いておきます。</strong>
+      このアプリにはサーバーが無く、PINの照合はすべて手元の端末の中で行われます。
+      そのためブラウザの開発者ツールを使える人には回避できます。
+      <strong>取り違えと軽いなりすましを防ぐための仕組みであって、本物の鍵ではありません。</strong>
+      成績を厳密に保証する用途には使わないでください。</p>
+  </div>
+
+  <div class="card">
+    <h2>記録の持ち出しと共有</h2>
+    <p class="hint">「履歴と推移」タブから書き出せるのは<strong>いま選ばれている自分の記録だけ</strong>です。
+      共用端末で書き出しても、他の人の記録は含まれません。</p>
+    <ul class="hint" style="padding-left:1.2em">
+      <li><strong>CSV</strong>：表計算ソフトで開ける形式。レップ1本が1行。他の人と比べたいときはこれを持ち寄る</li>
+      <li><strong>JSON</strong>：このアプリに読み込み直せる形式。機種変更のときの引っ越しに使う</li>
+      <li>記録はブラウザのデータを消すと一緒に消えます。大事な記録は定期的に書き出しておいてください</li>
     </ul>
   </div>
 
@@ -408,22 +466,68 @@
       <label class="field">学年<select id="amGrade"></select></label>
       <label class="field">性別<select id="amSex"></select></label>
     </div>
+
+    <div id="amPinBlock">
+      <div class="grid" style="margin-top:10px">
+        <label class="field">PIN（数字4桁） <span class="req">必須</span>
+          <input type="password" id="amPin" inputmode="numeric" autocomplete="off"
+                 maxlength="4" pattern="[0-9]*" placeholder="••••">
+        </label>
+        <label class="field">PIN（確認）
+          <input type="password" id="amPin2" inputmode="numeric" autocomplete="off"
+                 maxlength="4" pattern="[0-9]*" placeholder="••••">
+        </label>
+      </div>
+      <p class="hint small">自分の記録に他の人が書き込めないようにするための番号です。
+        <strong>ほかで使っているパスワードは使わないでください。</strong></p>
+    </div>
+
+    <label class="field" style="flex-direction:row;align-items:center;gap:8px;margin-top:10px">
+      <input type="checkbox" id="amTrust" style="width:auto" checked>
+      <span>この端末では次回からPINを聞かない</span>
+    </label>
+    <p class="hint small">自分のスマホならオン。部内の共用タブレットなら<strong>オフ</strong>にしてください。</p>
+
     <p class="status-line bad" id="amError" hidden></p>
     <div class="btn-row">
       <button class="btn primary" id="amSave" type="button">保存</button>
       <button class="btn" id="amCancel" type="button">やめる</button>
       <div class="spacer"></div>
+      <button class="btn" id="amChangePin" type="button" hidden>PINを変える</button>
       <button class="btn danger" id="amDelete" type="button" hidden>この人を削除</button>
     </div>
-    <p class="hint small">登録内容はこの端末のブラウザ内だけに保存されます。</p>
+    <p class="hint small">登録内容はこの端末のブラウザ内だけに保存されます。PINは元に戻せない形（ハッシュ）で保存されます。</p>
+  </div>
+</div>
+
+<!-- ============================= PIN入力 ============================= -->
+<div class="modal" id="pinModal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="pmTitle">
+    <h2 id="pmTitle">PINを入力</h2>
+    <p class="hint" id="pmHint"></p>
+    <label class="field">PIN（数字4桁）
+      <input type="password" id="pmPin" inputmode="numeric" autocomplete="off"
+             maxlength="4" pattern="[0-9]*" placeholder="••••">
+    </label>
+    <label class="field" id="pmTrustWrap" style="flex-direction:row;align-items:center;gap:8px;margin-top:10px">
+      <input type="checkbox" id="pmTrust" style="width:auto">
+      <span>この端末では次回から聞かない</span>
+    </label>
+    <p class="status-line bad" id="pmError" hidden></p>
+    <div class="btn-row">
+      <button class="btn primary" id="pmOk" type="button">確認</button>
+      <button class="btn" id="pmCancel" type="button">やめる</button>
+      <div class="spacer"></div>
+      <button class="btn" id="pmForgot" type="button" hidden>PINを忘れた</button>
+    </div>
   </div>
 </div>
 
 <!-- ?v= はキャッシュ対策。ファイルを更新したらこの番号を上げること -->
-<script src="js/kinematics.js?v=17"></script>
-<script src="js/tracker.js?v=17"></script>
-<script src="js/charts.js?v=17"></script>
-<script src="js/storage.js?v=17"></script>
-<script src="js/app.js?v=17"></script>
+<script src="js/kinematics.js?v=18"></script>
+<script src="js/tracker.js?v=18"></script>
+<script src="js/charts.js?v=18"></script>
+<script src="js/storage.js?v=18"></script>
+<script src="js/app.js?v=18"></script>
 </body>
 </html>

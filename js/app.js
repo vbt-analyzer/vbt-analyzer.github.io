@@ -994,10 +994,11 @@
       return;
     }
     var who = Store.athleteById($('fAthlete').value);
-    if (!who) {
-      $('saveStatus').textContent = Store.roster().length
-        ? '「選手」を選んでから保存してください。誰の記録か分からなくなります。'
-        : '先に「＋ 初めての人はここで登録」から選手を登録してください。';
+    if (!who || !isAuthed(who.id)) {
+      $('saveStatus').textContent = !Store.roster().length
+        ? '先に「＋ 初めての人はここで登録」から選手を登録してください。'
+        : (who ? '本人確認がまだです。選手を選び直してPINを入れてください。'
+               : '「選手」を選んでから保存してください。誰の記録か分からなくなります。');
       $('saveStatus').className = 'status-line bad';
       $('fAthlete').scrollIntoView({ block: 'center', behavior: 'smooth' });
       return;
@@ -1072,22 +1073,61 @@
       });
       if (Store.athleteById(cur)) sel.value = cur;
     }
-    $('editAthleteBtn').disabled = !sel.value;
+    $('editAthleteBtn').disabled = !isAuthed(sel.value);
     updateWho();
   }
 
   function updateWho() {
     var a = Store.currentAthlete();
     var btn = $('whoBtn');
+    var ok = !!a && isAuthed(a.id);
     $('whoName').textContent = a ? Store.athleteLabel(a) : '選手を選ぶ';
-    btn.classList.toggle('unset', !a);
+    btn.classList.toggle('unset', !ok);
   }
 
-  $('fAthlete').addEventListener('change', function () {
-    Store.setCurrentAthlete(this.value);
-    $('editAthleteBtn').disabled = !this.value;
+  // 本人確認が取れていないと、書き出しも保存もできない
+  function updateIoButtons() {
+    var ok = isAuthed(Store.currentAthleteId());
+    $('expCsv').disabled = !ok;
+    $('expJson').disabled = !ok;
+  }
+
+  /* ---------- 本人確認 ----------
+   * サーバーが無いので、これは「鍵」ではなく取り違え・軽いなりすましを防ぐ仕組み。
+   * authedId は、このページを開いてから本人確認が取れている選手。 */
+  var authedId = '';
+
+  function isAuthed(id) { return !!id && authedId === id; }
+
+  function afterAuthChange() {
+    var id = Store.currentAthleteId();
+    if (!Store.athleteById(id)) id = '';
+    $('fAthlete').value = id;
+    $('editAthleteBtn').disabled = !isAuthed(id);
     updateWho();
-  });
+    updateIoButtons();
+  }
+
+  // 選手を選ぶ＝その人として記録できる状態にすること。必要ならPINを聞く。
+  function selectAthlete(id, done) {
+    if (!id) {
+      authedId = ''; Store.setCurrentAthlete(''); afterAuthChange();
+      if (done) done(false);
+      return;
+    }
+    if (authedId === id || !Store.hasPin(id) || Store.isTrusted(id)) {
+      authedId = id; Store.setCurrentAthlete(id); afterAuthChange();
+      if (done) done(true);
+      return;
+    }
+    askPin(id, function (ok) {
+      if (ok) { authedId = id; Store.setCurrentAthlete(id); }
+      afterAuthChange();
+      if (done) done(ok);
+    });
+  }
+
+  $('fAthlete').addEventListener('change', function () { selectAthlete(this.value); });
 
   // ヘッダーの名前を押したら、選手の欄まで連れて行く
   $('whoBtn').addEventListener('click', function () {
@@ -1097,8 +1137,87 @@
     $('fAthlete').focus();
   });
 
+  /* ---------- PIN入力モーダル（選手PIN・管理PIN 兼用） ---------- */
+  var pmCtx = null;
+
+  function closePinModal() { $('pinModal').hidden = true; pmCtx = null; }
+
+  function pmFail(msg) { $('pmError').textContent = msg; $('pmError').hidden = false; }
+
+  function askPin(id, cb) {
+    var a = Store.athleteById(id);
+    if (!a) { cb(false); return; }
+    pmCtx = { mode: 'athlete', id: id, cb: cb };
+    $('pmTitle').textContent = a.name + ' のPIN';
+    $('pmHint').textContent = 'この人として記録するには、本人のPINを入れてください。';
+    $('pmPin').value = '';
+    $('pmError').hidden = true;
+    $('pmTrust').checked = Store.isTrusted(id);
+    $('pmTrustWrap').hidden = false;
+    $('pmForgot').hidden = false;
+    $('pinModal').hidden = false;
+    setTimeout(function () { $('pmPin').focus(); }, 30);
+  }
+
+  /* 管理PIN。設定されていなければ、警告つきの確認だけで通す。 */
+  function askAdminPin(reason, cb) {
+    if (!Store.hasAdminPin()) {
+      cb(confirm(reason + '\n\nこの端末には管理PINが設定されていません。'
+        + 'いまは誰でもこの操作ができる状態です。\n続けますか？'));
+      return;
+    }
+    pmCtx = { mode: 'admin', cb: cb };
+    $('pmTitle').textContent = '管理PIN';
+    $('pmHint').textContent = reason;
+    $('pmPin').value = '';
+    $('pmError').hidden = true;
+    $('pmTrustWrap').hidden = true;
+    $('pmForgot').hidden = true;
+    $('pinModal').hidden = false;
+    setTimeout(function () { $('pmPin').focus(); }, 30);
+  }
+
+  $('pmOk').addEventListener('click', function () {
+    if (!pmCtx) return;
+    var ctx = pmCtx, pin = $('pmPin').value;
+    var check = ctx.mode === 'admin' ? Store.verifyAdminPin(pin) : Store.verifyPin(ctx.id, pin);
+    check.then(function (ok) {
+      if (!ok) { pmFail('PINが違います。'); $('pmPin').value = ''; $('pmPin').focus(); return; }
+      if (ctx.mode === 'athlete') Store.setTrusted(ctx.id, $('pmTrust').checked);
+      closePinModal();
+      ctx.cb(true);
+    });
+  });
+
+  $('pmPin').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); $('pmOk').click(); }
+  });
+
+  $('pmCancel').addEventListener('click', function () {
+    var ctx = pmCtx;
+    closePinModal();
+    if (ctx) ctx.cb(false);
+  });
+
+  $('pinModal').addEventListener('click', function (e) {
+    if (e.target === this) $('pmCancel').click();
+  });
+
+  // PINを忘れたときは、管理PINを通したうえで本人に再設定してもらう
+  $('pmForgot').addEventListener('click', function () {
+    var ctx = pmCtx;
+    if (!ctx || ctx.mode !== 'athlete') return;
+    var a = Store.athleteById(ctx.id);
+    closePinModal();
+    if (ctx.cb) ctx.cb(false);
+    askAdminPin((a ? a.name : 'この選手') + ' のPINを再設定します。', function (ok) {
+      if (ok) openAthleteModal(a.id, { resetPin: true });
+    });
+  });
+
   /* ---------- 登録・編集モーダル ---------- */
   var amEditingId = null;
+  var amPinRequired = false;
 
   function fillOptions(sel, values, includeBlank) {
     sel.textContent = '';
@@ -1112,23 +1231,36 @@
     });
   }
 
-  function openAthleteModal(id, firstRun) {
+  function showPinFields(on) {
+    amPinRequired = on;
+    $('amPinBlock').hidden = !on;
+    $('amPin').value = ''; $('amPin2').value = '';
+  }
+
+  function openAthleteModal(id, opts) {
+    opts = opts || {};
     amEditingId = id || null;
     fillOptions($('amGrade'), Store.GRADES, true);
     fillOptions($('amSex'), Store.SEXES, true);
     var a = id ? Store.athleteById(id) : null;
-    $('amTitle').textContent = a ? '選手の情報を直す' : '選手を登録';
-    $('amHint').textContent = firstRun
+
+    $('amTitle').textContent = !a ? '選手を登録' : (opts.resetPin ? 'PINを再設定' : '選手の情報を直す');
+    $('amHint').textContent = opts.firstRun
       ? 'はじめまして。記録を誰のものか区別するため、最初に一度だけ入力してください。次回からはプルダウンで選ぶだけです。'
-      : (a ? '学年が上がったときなどに変更してください。過去の記録は消えません。'
-           : '名前・学年・性別を入力してください。次回からはプルダウンで選ぶだけです。');
+      : opts.resetPin
+        ? '新しいPINを決めてください。古いPINは使えなくなります。'
+        : (a ? '学年が上がったときなどに変更してください。過去の記録は消えません。'
+             : '名前・学年・性別とPINを入力してください。次回からはプルダウンで選ぶだけです。');
     $('amName').value = a ? a.name : '';
     $('amGrade').value = a ? (a.grade || '') : '';
     $('amSex').value = a ? (a.sex || '') : '';
+    $('amTrust').checked = a ? Store.isTrusted(a.id) : true;
+    showPinFields(!a || !!opts.resetPin);
+    $('amChangePin').hidden = !a || !!opts.resetPin;
     $('amDelete').hidden = !a;
     $('amError').hidden = true;
     $('athleteModal').hidden = false;
-    setTimeout(function () { $('amName').focus(); }, 30);
+    setTimeout(function () { $(a && !opts.resetPin ? 'amName' : (a ? 'amPin' : 'amName')).focus(); }, 30);
   }
 
   function closeAthleteModal() { $('athleteModal').hidden = true; amEditingId = null; }
@@ -1140,46 +1272,124 @@
 
   $('newAthleteBtn').addEventListener('click', function () { openAthleteModal(null); });
   $('editAthleteBtn').addEventListener('click', function () {
-    if ($('fAthlete').value) openAthleteModal($('fAthlete').value);
+    var id = $('fAthlete').value;
+    if (id && isAuthed(id)) openAthleteModal(id);
+  });
+  $('amChangePin').addEventListener('click', function () {
+    showPinFields(true);
+    $('amChangePin').hidden = true;
+    $('amHint').textContent = '新しいPINを決めてください。古いPINは使えなくなります。';
+    $('amPin').focus();
   });
   $('amCancel').addEventListener('click', closeAthleteModal);
   $('athleteModal').addEventListener('click', function (e) {
     if (e.target === this) closeAthleteModal();
   });
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && !$('athleteModal').hidden) closeAthleteModal();
+    if (e.key !== 'Escape') return;
+    if (!$('pinModal').hidden) { $('pmCancel').click(); return; }
+    if (!$('adminModal').hidden) { $('adminModal').hidden = true; return; }
+    if (!$('athleteModal').hidden) closeAthleteModal();
   });
-  $('amName').addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') { e.preventDefault(); $('amSave').click(); }
+  ['amName', 'amPin', 'amPin2'].forEach(function (id) {
+    $(id).addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); $('amSave').click(); }
+    });
   });
 
   $('amSave').addEventListener('click', function () {
     var name = $('amName').value.trim();
     if (!name) { amFail('名前を入力してください。'); return; }
+    var pin = $('amPin').value.trim(), pin2 = $('amPin2').value.trim();
+    if (amPinRequired) {
+      if (!/^\d{4}$/.test(pin)) { amFail('PINは数字4桁で入力してください。'); return; }
+      if (pin !== pin2) { amFail('PINが一致しません。もう一度入力してください。'); return; }
+    }
+    var a;
     try {
-      var a = amEditingId
+      a = amEditingId
         ? Store.updateAthlete(amEditingId, { name: name, grade: $('amGrade').value, sex: $('amSex').value })
         : Store.addAthlete({ name: name, grade: $('amGrade').value, sex: $('amSex').value });
+    } catch (err) { amFail(err.message); return; }
+
+    (amPinRequired ? Store.setPin(a.id, pin) : Promise.resolve()).then(function () {
+      Store.setTrusted(a.id, $('amTrust').checked);
+      authedId = a.id;
       Store.setCurrentAthlete(a.id);
       closeAthleteModal();
       renderAthleteSelect();
+      afterAuthChange();
       renderHistory();
-    } catch (err) {
-      amFail(err.message);
-    }
+    }, function (err) { amFail(err.message); });
   });
 
   $('amDelete').addEventListener('click', function () {
     var a = amEditingId ? Store.athleteById(amEditingId) : null;
     if (!a) return;
     var n = Store.load().filter(function (r) { return r.athleteId === a.id; }).length;
-    if (!confirm(a.name + ' を名簿から削除します。'
-      + (n ? '\n※ 記録 ' + n + '件はそのまま残ります（選手なしの扱いになります）。' : '')
-      + '\nよろしいですか？')) return;
-    Store.removeAthlete(a.id);
-    closeAthleteModal();
-    renderAthleteSelect();
-    renderHistory();
+    askAdminPin(a.name + ' を名簿から削除します。'
+      + (n ? '記録 ' + n + '件はそのまま残ります（選手なしの扱いになります）。' : ''), function (ok) {
+      if (!ok) return;
+      Store.removeAthlete(a.id);
+      if (authedId === a.id) authedId = '';
+      closeAthleteModal();
+      renderAthleteSelect();
+      afterAuthChange();
+      renderHistory();
+    });
+  });
+
+  /* ---------- 管理PINの設定 ---------- */
+  function updateAdminStatus() {
+    var on = Store.hasAdminPin();
+    $('adminStatus').textContent = on
+      ? '管理PINは設定済みです。PINのリセット・名簿からの削除・記録の一括削除・読み込みに必要になります。'
+      : '管理PINは未設定です。いまは誰でもPINのリセットや削除ができます。';
+    $('adminStatus').className = 'status-line ' + (on ? 'ok' : 'warn');
+    $('adminPinBtn').textContent = on ? '管理PINを変える／解除する' : '管理PINを設定する';
+  }
+
+  $('adminPinBtn').addEventListener('click', function () {
+    var on = Store.hasAdminPin();
+    $('apHint').textContent = on
+      ? 'いまの管理PINを入れてから、新しいPINを決めてください。'
+      : '共用端末で使うなら設定しておくことをおすすめします。忘れると解除できないので注意してください。';
+    $('apOldWrap').hidden = !on;
+    $('apOld').value = ''; $('apNew').value = ''; $('apNew2').value = '';
+    $('apError').hidden = true;
+    $('adminModal').hidden = false;
+    setTimeout(function () { $(on ? 'apOld' : 'apNew').focus(); }, 30);
+  });
+
+  $('apCancel').addEventListener('click', function () { $('adminModal').hidden = true; });
+  $('adminModal').addEventListener('click', function (e) {
+    if (e.target === this) $('adminModal').hidden = true;
+  });
+
+  $('apSave').addEventListener('click', function () {
+    var neu = $('apNew').value.trim(), neu2 = $('apNew2').value.trim();
+    if (neu && !/^\d{4}$/.test(neu)) {
+      $('apError').textContent = '管理PINは数字4桁で入力してください。';
+      $('apError').hidden = false; return;
+    }
+    if (neu !== neu2) {
+      $('apError').textContent = 'PINが一致しません。';
+      $('apError').hidden = false; return;
+    }
+    if (!neu && !confirm('管理PINを解除します。誰でもPINのリセットや削除ができる状態に戻ります。よろしいですか？')) return;
+    Store.verifyAdminPin($('apOld').value).then(function (ok) {
+      if (!ok) {
+        $('apError').textContent = 'いまの管理PINが違います。';
+        $('apError').hidden = false; return;
+      }
+      return Store.setAdminPin(neu).then(function () {
+        $('adminModal').hidden = true;
+        updateAdminStatus();
+      });
+    }, function (err) {
+      $('apError').textContent = err.message;
+      $('apError').hidden = false;
+    });
   });
 
   /* ================= 履歴 ================= */
@@ -1513,9 +1723,37 @@
   }
 
   /* ================= 入出力 ================= */
-  $('expJson').addEventListener('click', function () { Store.exportJSON(); });
-  $('expCsv').addEventListener('click', function () { Store.exportCSV(); });
-  $('impBtn').addEventListener('click', function () { $('impInput').click(); });
+  function ioSay(msg, cls) {
+    $('ioStatus').textContent = msg || '';
+    $('ioStatus').className = 'status-line ' + (cls || '');
+  }
+
+  // 書き出せるのは本人確認が取れている選手の分だけ
+  function exportOwn(kind) {
+    var id = Store.currentAthleteId();
+    if (!isAuthed(id)) {
+      ioSay('先に「解析」タブで選手を選び、PINを入れてください。', 'bad');
+      return;
+    }
+    var a = Store.athleteById(id);
+    var n = Store.ownRecords(id).length;
+    if (!n) { ioSay(a.name + ' の記録はまだありません。', 'warn'); return; }
+    try {
+      if (kind === 'csv') Store.exportCSV(id); else Store.exportJSON(id);
+      ioSay(a.name + ' の記録 ' + n + '件を書き出しました。', 'ok');
+    } catch (err) { ioSay(err.message, 'bad'); }
+  }
+
+  $('expCsv').addEventListener('click', function () { exportOwn('csv'); });
+  $('expJson').addEventListener('click', function () { exportOwn('json'); });
+
+  // 読み込みは他人の名前で記録を足せてしまうので、管理PINで守る
+  $('impBtn').addEventListener('click', function () {
+    askAdminPin('JSONファイルを読み込みます。ファイルに入っている選手の記録がこの端末に追加されます。', function (ok) {
+      if (ok) $('impInput').click();
+    });
+  });
+
   $('impInput').addEventListener('change', function (e) {
     var f = e.target.files && e.target.files[0];
     if (!f) return;
@@ -1523,19 +1761,26 @@
     fr.onload = function () {
       try {
         var n = Store.importJSON(String(fr.result));
-        alert(n + '件を読み込みました。');
+        ioSay(n + '件を読み込みました。', 'ok');
+        renderAthleteSelect();
+        afterAuthChange();
         renderHistory();
       } catch (err) {
-        alert('読み込めませんでした: ' + err.message);
+        ioSay('読み込めませんでした: ' + err.message, 'bad');
       }
     };
     fr.readAsText(f);
     e.target.value = '';
   });
+
   $('clearBtn').addEventListener('click', function () {
-    if (!confirm('この端末に保存されているすべての記録を削除します。取り消せません。よろしいですか？')) return;
-    Store.clearAll();
-    renderHistory();
+    askAdminPin('この端末に保存されているすべての記録を削除します。取り消せません。', function (ok) {
+      if (!ok) return;
+      if (!confirm('本当に削除しますか？　全員分の記録が消えます。')) return;
+      Store.clearAll();
+      ioSay('記録をすべて削除しました。', 'ok');
+      renderHistory();
+    });
   });
 
   /* ================= PWA ================= */
@@ -1566,8 +1811,17 @@
   $('fDate').value = new Date().toISOString().slice(0, 10);
   Store.migrateLegacyAthletes();   // 名簿導入前の記録を名簿に取り込む
   renderAthleteSelect();
+  updateAdminStatus();
+  // 前回選ばれていた人は、PIN不要（信頼済み・PIN未設定）なら自動で復帰する
+  (function () {
+    var last = Store.currentAthleteId();
+    if (last && Store.athleteById(last) && (!Store.hasPin(last) || Store.isTrusted(last))) {
+      authedId = last;
+    }
+    afterAuthChange();
+  })();
   // この端末で誰も登録されていなければ、最初に一度だけ登録してもらう
-  if (!Store.roster().length) setTimeout(function () { openAthleteModal(null, true); }, 400);
+  if (!Store.roster().length) setTimeout(function () { openAthleteModal(null, { firstRun: true }); }, 400);
   syncModeButtons();
   setSource('file');
   if (camSupported) {

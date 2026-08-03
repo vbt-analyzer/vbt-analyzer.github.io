@@ -11,6 +11,8 @@
   var SETTINGS_KEY = 'vbt.settings.v1';
   var ROSTER_KEY = 'vbt.roster.v1';
   var CURRENT_KEY = 'vbt.currentAthlete.v1';
+  var ADMIN_KEY = 'vbt.admin.v1';
+  var TRUST_KEY = 'vbt.trusted.v1';
 
   var GRADES = ['1年', '2年', '3年', '4年', 'その他'];
   var SEXES = ['男子', '女子', '回答しない'];
@@ -152,6 +154,7 @@
 
   function removeAthlete(id) {
     saveRoster(roster().filter(function (a) { return a.id !== id; }));
+    setTrusted(id, false);
     if (currentAthleteId() === id) setCurrentAthlete('');
   }
 
@@ -203,6 +206,119 @@
     return touched;
   }
 
+  /* ============================================================
+   * PIN（本人確認）
+   *
+   * ここで断っておく：これは「鍵」ではない。サーバーが無いので照合はすべて
+   * この端末の中で行われ、開発者ツールを使える人には回避できる。
+   * 狙いは、共用端末での取り違えと軽いなりすましを防ぐこと。
+   * 平文では持たず、選手ごとのソルト付き SHA-256 で保存する。
+   * ============================================================ */
+  function randSalt() {
+    var a = new Uint8Array(8);
+    if (global.crypto && global.crypto.getRandomValues) global.crypto.getRandomValues(a);
+    else for (var i = 0; i < a.length; i++) a[i] = Math.floor(Math.random() * 256);
+    return Array.prototype.map.call(a, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+  }
+
+  // crypto.subtle が使えない環境（古いブラウザ等）のための代替。強度は落ちるが平文よりはまし。
+  function weakHash(text) {
+    var h1 = 0x811c9dc5, h2 = 0x01000193;
+    for (var i = 0; i < text.length; i++) {
+      var c = text.charCodeAt(i);
+      h1 = ((h1 ^ c) * 0x01000193) >>> 0;
+      h2 = ((h2 + c) * 0x85ebca6b) >>> 0;
+    }
+    return 'w' + ('00000000' + h1.toString(16)).slice(-8) + ('00000000' + h2.toString(16)).slice(-8);
+  }
+
+  function digest(text) {
+    var subtle = global.crypto && global.crypto.subtle;
+    if (subtle && subtle.digest && global.TextEncoder) {
+      try {
+        return subtle.digest('SHA-256', new TextEncoder().encode(text)).then(function (buf) {
+          return Array.prototype.map.call(new Uint8Array(buf), function (b) {
+            return ('0' + b.toString(16)).slice(-2);
+          }).join('');
+        }, function () { return weakHash(text); });
+      } catch (e) { /* 下の代替へ */ }
+    }
+    return Promise.resolve(weakHash(text));
+  }
+
+  function normalizePin(pin) { return String(pin == null ? '' : pin).trim(); }
+
+  function setPin(id, pin) {
+    var p = normalizePin(pin);
+    if (!/^\d{4}$/.test(p)) return Promise.reject(new Error('PINは数字4桁で入力してください'));
+    var salt = randSalt();
+    return digest(salt + '|' + p).then(function (h) {
+      var list = roster(), found = false;
+      list.forEach(function (a) {
+        if (a.id === id) { a.pinSalt = salt; a.pinHash = h; found = true; }
+      });
+      if (!found) throw new Error('選手が見つかりません');
+      saveRoster(list);
+    });
+  }
+
+  function hasPin(id) {
+    var a = athleteById(id);
+    return !!(a && a.pinHash);
+  }
+
+  function verifyPin(id, pin) {
+    var a = athleteById(id);
+    if (!a) return Promise.resolve(false);
+    if (!a.pinHash) return Promise.resolve(true); // PIN未設定の人（旧データ）は素通し
+    return digest(a.pinSalt + '|' + normalizePin(pin)).then(function (h) { return h === a.pinHash; });
+  }
+
+  /* ---------- 管理PIN（なりすまし防止用） ----------
+   * 他人のPINリセット・名簿からの削除・全記録の削除に必要。
+   * 設定していなければ、それらは確認だけで実行できる。 */
+  function adminRec() {
+    try { return JSON.parse(global.localStorage.getItem(ADMIN_KEY) || 'null'); }
+    catch (e) { return null; }
+  }
+
+  function hasAdminPin() { return !!adminRec(); }
+
+  function setAdminPin(pin) {
+    var p = normalizePin(pin);
+    if (!p) { try { global.localStorage.removeItem(ADMIN_KEY); } catch (e) { /* noop */ } return Promise.resolve(); }
+    if (!/^\d{4}$/.test(p)) return Promise.reject(new Error('管理PINは数字4桁で入力してください'));
+    var salt = randSalt();
+    return digest(salt + '|' + p).then(function (h) {
+      try { global.localStorage.setItem(ADMIN_KEY, JSON.stringify({ salt: salt, hash: h })); }
+      catch (e) { /* noop */ }
+    });
+  }
+
+  function verifyAdminPin(pin) {
+    var r = adminRec();
+    if (!r) return Promise.resolve(true); // 未設定なら誰でも通す（その旨は画面で明示する）
+    return digest(r.salt + '|' + normalizePin(pin)).then(function (h) { return h === r.hash; });
+  }
+
+  /* ---------- この端末で PIN を省略してよい選手 ----------
+   * 個人のスマホなら一度きり、共用端末なら毎回、という使い分けのため。 */
+  function trustedIds() {
+    try {
+      var raw = global.localStorage.getItem(TRUST_KEY);
+      var a = raw ? JSON.parse(raw) : [];
+      return Array.isArray(a) ? a : [];
+    } catch (e) { return []; }
+  }
+
+  function isTrusted(id) { return trustedIds().indexOf(id) >= 0; }
+
+  function setTrusted(id, on) {
+    var list = trustedIds().filter(function (x) { return x !== id; });
+    if (on) list.push(id);
+    try { global.localStorage.setItem(TRUST_KEY, JSON.stringify(list)); } catch (e) { /* noop */ }
+  }
+
   /* ---------- 設定（最小速度閾値など） ---------- */
   function settings() {
     try {
@@ -236,12 +352,25 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
 
-  function exportJSON() {
+  /* 書き出しは「その選手の分だけ」に限る。共用端末で誰かが書き出したときに
+   * 他の部員の記録まで一緒に出てしまわないようにするため。 */
+  function ownRecords(athleteId) {
+    return load().filter(function (r) { return r.athleteId === athleteId; });
+  }
+
+  function safeName(s) {
+    return String(s || 'unknown').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 24);
+  }
+
+  function exportJSON(athleteId) {
+    var a = athleteById(athleteId);
+    if (!a) throw new Error('選手が選ばれていません');
+    var prof = { id: a.id, name: a.name, grade: a.grade, sex: a.sex }; // PINは書き出さない
     var payload = {
       format: 'vbt-sessions', version: 2, exportedAt: new Date().toISOString(),
-      roster: roster(), sessions: load()
+      roster: [prof], sessions: ownRecords(athleteId)
     };
-    download('vbt-sessions-' + new Date().toISOString().slice(0, 10) + '.json',
+    download('vbt-' + safeName(a.name) + '-' + new Date().toISOString().slice(0, 10) + '.json',
       JSON.stringify(payload, null, 2), 'application/json');
   }
 
@@ -255,10 +384,12 @@
     ['barPathDeviation', '左右ブレ_m'], ['note', 'メモ']
   ];
 
-  function exportCSV() {
+  function exportCSV(athleteId) {
+    var a = athleteById(athleteId);
+    if (!a) throw new Error('選手が選ばれていません');
     var rows = [CSV_COLS.map(function (c) { return c[1]; })];
-    load().forEach(function (r) {
-      var prof = athleteById(r.athleteId) || {};
+    ownRecords(athleteId).forEach(function (r) {
+      var prof = a;
       (r.reps || []).forEach(function (m, i) {
         rows.push(CSV_COLS.map(function (c) {
           var k = c[0];
@@ -278,7 +409,8 @@
       }).join(',');
     }).join('\r\n');
     // Excel が UTF-8 と判別できるよう BOM を付ける
-    download('vbt-reps-' + new Date().toISOString().slice(0, 10) + '.csv', '﻿' + csv, 'text/csv');
+    download('vbt-' + safeName(a.name) + '-' + new Date().toISOString().slice(0, 10) + '.csv',
+      '﻿' + csv, 'text/csv');
   }
 
   function importJSON(text) {
@@ -331,6 +463,10 @@
     currentAthleteId: currentAthleteId, setCurrentAthlete: setCurrentAthlete,
     currentAthlete: currentAthlete, athleteLabel: athleteLabel,
     migrateLegacyAthletes: migrateLegacyAthletes,
+    setPin: setPin, hasPin: hasPin, verifyPin: verifyPin,
+    hasAdminPin: hasAdminPin, setAdminPin: setAdminPin, verifyAdminPin: verifyAdminPin,
+    isTrusted: isTrusted, setTrusted: setTrusted, trustedIds: trustedIds,
+    ownRecords: ownRecords,
     settings: settings, saveSettings: saveSettings, mvtFor: mvtFor,
     exportJSON: exportJSON, exportCSV: exportCSV, importJSON: importJSON, download: download
   };
