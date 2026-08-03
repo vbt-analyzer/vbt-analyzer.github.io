@@ -1788,7 +1788,12 @@
     // Service Worker は https（または localhost）でのみ登録できる。
     // ファイルを直接開いた場合は何もしない。
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
-      navigator.serviceWorker.register('sw.js').catch(function () { /* 失敗しても本体は動く */ });
+      /* updateViaCache:'none' が要る。これが無いと sw.js 自体がブラウザのHTTPキャッシュから
+       * 返され、VERSION を上げても更新が数分〜数十分届かないことがある。 */
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(function (reg) {
+        reg.update();                                   // 起動のたびに更新を確認する
+        setInterval(function () { reg.update(); }, 60 * 60 * 1000);
+      }, function () { /* 失敗しても本体は動く */ });
     }
     var deferred = null;
     global.addEventListener('beforeinstallprompt', function (e) {
