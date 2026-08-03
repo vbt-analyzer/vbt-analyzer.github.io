@@ -907,20 +907,23 @@
     var m = r.out.metrics, series = r.out.series;
     $('results').hidden = false;
 
-    var best = m.length ? Math.max.apply(null, m.map(function (x) { return x.propulsiveVelocity; })) : 0;
-    var peakP = m.length ? Math.max.apply(null, m.map(function (x) { return x.peakPower; })) : 0;
-    var meanP = m.length ? m.reduce(function (a, x) { return a + x.meanPower; }, 0) / m.length : 0;
-    var meanRom = m.length ? m.reduce(function (a, x) { return a + x.rom; }, 0) / m.length : 0;
-    var vloss = Kin.velocityLoss(m);
+    /* セットの要約。速度の代表値はMPV基準で揃える（理由は kinematics.js の setSummary 参照）。
+     * 「セット平均」だけでは判断材料として弱いので、最速レップと速度低下率を並べて出す。 */
+    var sum = Kin.setSummary(m);
+    var setT = $('setTiles'), bestT = $('bestTiles');
+    setT.textContent = ''; bestT.textContent = '';
+    if (sum) {
+      setT.appendChild(tile('セット平均 速度', fmt(sum.meanVelocity, 2), ' m/s', true));
+      setT.appendChild(tile('レップ数', String(sum.reps), ' 回'));
+      setT.appendChild(tile('セット平均 パワー', fmt(sum.meanPower, 0), ' W'));
+      setT.appendChild(tile('速度低下率', fmt(sum.velocityLoss, 1), ' %'));
+      setT.appendChild(tile('平均可動域', fmt(sum.meanRom * 100, 1), ' cm'));
 
-    var tl = $('resultTiles');
-    tl.textContent = '';
-    tl.appendChild(tile('最高 平均推進速度', fmt(best, 2), ' m/s', true));
-    tl.appendChild(tile('レップ数', String(m.length), ' 回'));
-    tl.appendChild(tile('最大パワー', fmt(peakP, 0), ' W'));
-    tl.appendChild(tile('平均パワー', fmt(meanP, 0), ' W'));
-    tl.appendChild(tile('速度低下率', fmt(vloss, 1), ' %'));
-    tl.appendChild(tile('平均可動域', fmt(meanRom * 100, 1), ' cm'));
+      bestT.appendChild(tile('速度（' + sum.bestRep + '本目）', fmt(sum.bestVelocity, 2), ' m/s'));
+      bestT.appendChild(tile('最大パワー', fmt(sum.peakPower, 0), ' W'));
+      bestT.appendChild(tile('最終レップの速度', fmt(sum.lastVelocity, 2), ' m/s'));
+      bestT.appendChild(tile('最速との差', fmt(sum.bestVelocity - sum.lastVelocity, 2), ' m/s'));
+    }
 
     var bands = r.out.reps.map(function (rep, i) {
       return { x0: series[rep.s].t, x1: series[rep.e].t, label: String(i + 1) };
@@ -947,20 +950,16 @@
       yLabel: 'パワー (W)', unit: ' W', yDecimals: 0,
       series: [{ name: 'パワー', points: powPts, color: getComputedStyle(document.documentElement).getPropertyValue('--series-2').trim() }]
     });
-    var repCfg = {
-      title: 'レップ別の平均推進速度',
-      subtitle: 'セット内での速度の落ち方を見る',
-      yLabel: '速度 (m/s)', xLabel: 'レップ', unit: ' m/s', yDecimals: 2, height: 190,
-      bars: m.map(function (x, i) { return { label: String(i + 1), value: x.propulsiveVelocity }; })
-    };
-
     if (!charts.vel) {
       charts.vel = Charts.line($('chartVel'), velCfg);
       charts.pow = Charts.line($('chartPow'), powCfg);
-      charts.rep = Charts.bars($('chartRep'), repCfg);
+      charts.rep = Charts.bars($('chartRep'), repChartCfg());
     } else {
-      charts.vel.update(velCfg); charts.pow.update(powCfg); charts.rep.update(repCfg);
+      charts.vel.update(velCfg); charts.pow.update(powCfg); charts.rep.update(repChartCfg());
     }
+    $('pathStage').hidden = true;
+    $('pathToggle').textContent = '軌跡を表示';
+    $('pathStatus').textContent = '';
 
     var head = ['レップ', '開始(秒)', '可動域(cm)', '所要(秒)', '平均推進速度(m/s)',
       '平均速度(m/s)', '最高速度(m/s)', '平均力(N)', '平均パワー(W)', '最大パワー(W)', '左右ブレ(cm)'];
@@ -981,6 +980,133 @@
     });
     tbl.appendChild(tb);
   }
+
+  /* ---------- レップ別チャート（見る指標を切り替えられる） ---------- */
+  var REP_METRICS = {
+    propulsiveVelocity: ['平均推進速度', ' m/s', 2, 1, '押し続けている区間の平均。負荷管理の基準になる値'],
+    peakVelocity: ['最高速度', ' m/s', 2, 1, '瞬間の最大。爆発力の目安だが、撮影fpsの影響を受けやすい'],
+    meanPower: ['平均パワー', ' W', 0, 1, '挙上局面の平均。バー重量だけで計算している'],
+    peakPower: ['最大パワー', ' W', 0, 1, '瞬間の最大。こちらも撮影fpsの影響を受けやすい'],
+    rom: ['可動域', ' cm', 1, 100, 'レップごとの動作範囲。疲れると狭くなりやすい']
+  };
+
+  function repChartCfg() {
+    var r = S.result;
+    var m = (r && r.out.metrics) || [];
+    var k = $('repMetric').value;
+    var info = REP_METRICS[k] || REP_METRICS.propulsiveVelocity;
+    return {
+      title: 'レップ別の' + info[0],
+      subtitle: info[4],
+      yLabel: info[0] + ' (' + info[1].trim() + ')', xLabel: 'レップ',
+      unit: info[1], yDecimals: info[2], height: 190,
+      bars: m.map(function (x, i) { return { label: String(i + 1), value: x[k] * info[3] }; })
+    };
+  }
+
+  $('repMetric').addEventListener('change', function () {
+    if (charts.rep) charts.rep.update(repChartCfg());
+  });
+
+  /* ---------- バーの軌跡 ----------
+   * 追跡結果には水平方向の座標も入っているので、映像の上に道すじを重ねて描ける。
+   * レップごとの色分けは順序のある量なので、カテゴリ配色ではなく
+   * 明→暗の単一色ランプを使う（1本目が明るく、最終レップが暗い）。 */
+  var BLUE_RAMP_LIGHT = ['#86b6ef', '#6da7ec', '#5598e7', '#3987e5', '#2a78d6',
+                         '#256abf', '#1c5cab', '#184f95', '#104281', '#0d366b'];
+  var BLUE_RAMP_DARK = ['#cde2fb', '#b7d3f6', '#9ec5f4', '#86b6ef', '#6da7ec',
+                        '#5598e7', '#3987e5', '#2a78d6', '#256abf', '#184f95'];
+
+  function isDarkTheme() {
+    var s = getComputedStyle(document.documentElement).getPropertyValue('--surface-1').trim();
+    var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(s.replace('#', '#'));
+    if (!m) return false;
+    var lum = 0.2126 * parseInt(m[1], 16) + 0.7152 * parseInt(m[2], 16) + 0.0722 * parseInt(m[3], 16);
+    return lum < 128;
+  }
+
+  function rampColor(i, n) {
+    var ramp = isDarkTheme() ? BLUE_RAMP_DARK : BLUE_RAMP_LIGHT;
+    if (n <= 1) return ramp[Math.floor(ramp.length / 2)];
+    return ramp[Math.round(i / (n - 1) * (ramp.length - 1))];
+  }
+
+  function renderBarPath() {
+    var r = S.result;
+    if (!r || !r.out.series.length) { $('pathStatus').textContent = '軌跡を描けるデータがありません。'; return; }
+    var series = r.out.series, reps = r.out.reps;
+    var mpp = S.metersPerPixel;
+    var cv = $('pathCanvas');
+    cv.width = frameCanvas.width; cv.height = frameCanvas.height;
+    var ctx = cv.getContext('2d');
+
+    // 代表フレーム（セットの中ほど）を背景に敷く。動画時間はスロー倍率をかけ戻す。
+    var midT = series[Math.floor(series.length / 2)].t * (r.slowFactor || 1);
+    return seekTo(midT).then(function () {
+      ctx.drawImage(videoEl, 0, 0, cv.width, cv.height);
+      ctx.fillStyle = 'rgba(0,0,0,0.30)';        // 線を見やすくするため映像を少し沈める
+      ctx.fillRect(0, 0, cv.width, cv.height);
+
+      function cx(p) { return (p.x / mpp) / origPerCanvas; }
+      function cy(p) { return (-p.pos / mpp) / origPerCanvas; }
+
+      // 全体の道すじ（下ろす局面を含む）
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.lineWidth = 1.5; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.beginPath();
+      series.forEach(function (p, i) {
+        if (i === 0) ctx.moveTo(cx(p), cy(p)); else ctx.lineTo(cx(p), cy(p));
+      });
+      ctx.stroke();
+
+      // 挙上局面を濃く重ねる
+      var byRep = $('pathRepColors').checked;
+      var flat = getComputedStyle(document.documentElement).getPropertyValue('--series-1').trim() || '#2a78d6';
+      reps.forEach(function (rep, i) {
+        ctx.strokeStyle = byRep ? rampColor(i, reps.length) : flat;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        for (var k = rep.s; k <= rep.e; k++) {
+          var p = series[k];
+          if (k === rep.s) ctx.moveTo(cx(p), cy(p)); else ctx.lineTo(cx(p), cy(p));
+        }
+        ctx.stroke();
+        // 開始点（下）と終了点（上）
+        [series[rep.s], series[rep.e]].forEach(function (p, j) {
+          ctx.beginPath();
+          ctx.arc(cx(p), cy(p), 4.5, 0, Math.PI * 2);
+          ctx.fillStyle = j === 0 ? 'rgba(255,255,255,0.9)' : (byRep ? rampColor(i, reps.length) : flat);
+          ctx.fill();
+          ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.stroke();
+        });
+      });
+
+      var dev = r.out.metrics.map(function (x) { return x.barPathDeviation * 100; });
+      var maxDev = dev.length ? Math.max.apply(null, dev) : 0;
+      var avgDev = dev.length ? dev.reduce(function (a, b) { return a + b; }, 0) / dev.length : 0;
+      $('pathStatus').textContent = '左右のブレ： 平均 ' + fmt(avgDev, 1) + ' cm ／ 最大 ' + fmt(maxDev, 1) + ' cm。'
+        + (byRep ? ' 色が薄いほど早いレップ、濃いほど後のレップです。' : '')
+        + ' カメラが正対していないと、ブレが実際より大きく見えることがあります。';
+      $('pathStatus').className = 'status-line';
+    });
+  }
+
+  $('pathToggle').addEventListener('click', function () {
+    var stage = $('pathStage');
+    if (stage.hidden) {
+      stage.hidden = false;
+      this.textContent = '軌跡を隠す';
+      renderBarPath();
+    } else {
+      stage.hidden = true;
+      this.textContent = '軌跡を表示';
+      $('pathStatus').textContent = '';
+    }
+  });
+
+  $('pathRepColors').addEventListener('change', function () {
+    if (!$('pathStage').hidden) renderBarPath();
+  });
 
   $('discardBtn').addEventListener('click', function () {
     S.result = null; $('results').hidden = true; $('saveStatus').textContent = '';

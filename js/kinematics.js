@@ -318,6 +318,44 @@
     return (best - last) / best * 100;
   }
 
+  /* ---------- セット全体の要約 ----------
+   * 平均はすべて「各レップの値の単純平均」。
+   * 速度の代表値に MPV（平均推進速度）を使うのは、
+   *  ・最大値は単一サンプルなのでノイズに弱く、しかも上振れ方向に偏る
+   *  ・MCV（可動域÷時間）は軽い重量ほど減速区間の割合が増えて平均を押し下げ、
+   *    その度合いが重量ごとに違うため荷重-速度の関係が歪む
+   * という2点を避けるため。高重量域では減速区間がほぼ無くMPVとMCVは一致するので、
+   * MPVを使って不利になる場面は無い。
+   */
+  function setSummary(metrics) {
+    var n = metrics.length;
+    if (!n) return null;
+    function mean(k) {
+      return metrics.reduce(function (a, x) { return a + x[k]; }, 0) / n;
+    }
+    var bestIdx = 0, worstIdx = 0;
+    for (var i = 1; i < n; i++) {
+      if (metrics[i].propulsiveVelocity > metrics[bestIdx].propulsiveVelocity) bestIdx = i;
+      if (metrics[i].propulsiveVelocity < metrics[worstIdx].propulsiveVelocity) worstIdx = i;
+    }
+    return {
+      reps: n,
+      meanVelocity: mean('propulsiveVelocity'),   // セット平均（MPV基準）
+      meanConcentric: mean('meanVelocity'),       // 参考: 上昇局面まるごとの平均
+      meanPeakVelocity: mean('peakVelocity'),     // 参考: 各レップの最高速度の平均
+      bestVelocity: metrics[bestIdx].propulsiveVelocity,
+      bestRep: bestIdx + 1,
+      lastVelocity: metrics[n - 1].propulsiveVelocity,
+      slowestVelocity: metrics[worstIdx].propulsiveVelocity,
+      velocityLoss: velocityLoss(metrics),
+      meanPower: mean('meanPower'),
+      bestMeanPower: Math.max.apply(null, metrics.map(function (x) { return x.meanPower; })),
+      peakPower: Math.max.apply(null, metrics.map(function (x) { return x.peakPower; })),
+      meanRom: mean('rom'),
+      totalTime: metrics[n - 1].endT - metrics[0].startT
+    };
+  }
+
   /* ---------- 荷重-速度プロファイルと推定1RM ----------
    * points: [{load, velocity}] （1セット1点、通常はそのセットの最速レップ）
    * mvt: 最小速度閾値 [m/s]
@@ -363,6 +401,7 @@
     repMetrics: repMetrics,
     analyze: analyze,
     velocityLoss: velocityLoss,
+    setSummary: setSummary,
     loadVelocityProfile: loadVelocityProfile
   };
 })(this);

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VBT Analyzer — 挙上速度・パワー解析</title>
 <meta name="description" content="ウエイトトレーニングの動画から挙上速度とパワーを算出し、推移をグラフ化する。ブラウザだけで動作し、動画は端末外に送信しない。">
-<link rel="stylesheet" href="css/style.css?v=19">
+<link rel="stylesheet" href="css/style.css?v=20">
 
 <!-- PWA（ホーム画面に追加してアプリのように使う） -->
 <link rel="manifest" href="manifest.webmanifest">
@@ -226,10 +226,38 @@
   <div id="results" hidden>
     <div class="card">
       <h2>結果</h2>
-      <div class="tiles" id="resultTiles"></div>
+      <h3 class="group-title">セット全体</h3>
+      <div class="tiles" id="setTiles"></div>
+      <h3 class="group-title">最速レップ（疲労前の実力）</h3>
+      <div class="tiles" id="bestTiles"></div>
+
       <div id="chartVel"></div>
       <div id="chartPow"></div>
+
+      <label class="field" style="max-width:260px">レップ別に見る指標
+        <select id="repMetric">
+          <option value="propulsiveVelocity">平均推進速度 (m/s)</option>
+          <option value="peakVelocity">最高速度 (m/s)</option>
+          <option value="meanPower">平均パワー (W)</option>
+          <option value="peakPower">最大パワー (W)</option>
+          <option value="rom">可動域 (cm)</option>
+        </select>
+      </label>
       <div id="chartRep"></div>
+
+      <h3 class="chart-title" style="margin-top:14px">バーの軌跡</h3>
+      <p class="chart-sub">マーカーが実際に通った道すじです。挙上局面を濃く、下ろす局面を薄く描いています。</p>
+      <div class="mode-row" style="margin-top:0">
+        <button class="btn" id="pathToggle" type="button">軌跡を表示</button>
+        <label class="field" style="flex-direction:row;align-items:center;gap:6px">
+          <input type="checkbox" id="pathRepColors" style="width:auto"> レップごとに色を変える
+        </label>
+      </div>
+      <div class="stage" id="pathStage" hidden>
+        <canvas id="pathCanvas"></canvas>
+      </div>
+      <p class="status-line" id="pathStatus"></p>
+
       <h3 class="chart-title" style="margin-top:14px">レップ別の指標</h3>
       <div class="table-scroll"><table id="repTable"></table></div>
       <div class="btn-row">
@@ -524,10 +552,10 @@
 </div>
 
 <!-- ?v= はキャッシュ対策。ファイルを更新したらこの番号を上げること -->
-<script src="js/kinematics.js?v=19"></script>
-<script src="js/tracker.js?v=19"></script>
-<script src="js/charts.js?v=19"></script>
-<script src="js/storage.js?v=19"></script>
-<script src="js/app.js?v=19"></script>
+<script src="js/kinematics.js?v=20"></script>
+<script src="js/tracker.js?v=20"></script>
+<script src="js/charts.js?v=20"></script>
+<script src="js/storage.js?v=20"></script>
+<script src="js/app.js?v=20"></script>
 </body>
 </html>

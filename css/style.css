@@ -321,6 +321,16 @@ footer {
   .tile.hero .value { font-size: 32px; }
 }
 
+/* ---------- 結果のグループ見出し ---------- */
+.group-title {
+  margin: 14px 0 6px; font-size: 12px; font-weight: 650;
+  color: var(--text-secondary); letter-spacing: .04em;
+}
+.group-title:first-of-type { margin-top: 4px; }
+
+#pathStage { margin-top: 8px; }
+#pathCanvas { display: block; width: 100%; height: auto; }
+
 /* ---------- 現在の選手 ---------- */
 .btn.who {
   max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
