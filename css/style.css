@@ -321,6 +321,47 @@ footer {
   .tile.hero .value { font-size: 32px; }
 }
 
+/* ---------- 現在の選手 ---------- */
+.btn.who {
+  max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 600;
+}
+.btn.who::before { content: "👤 "; font-weight: 400; }
+.btn.who.unset { color: var(--critical); }
+
+/* ---------- モーダル ---------- */
+.modal {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0, 0, 0, .45);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  overscroll-behavior: contain;
+}
+.modal[hidden] { display: none; }
+.modal-card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px;
+  width: 100%; max-width: 420px;
+  max-height: 90vh; overflow-y: auto;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .3);
+}
+.modal-card h2 { margin: 0 0 4px; font-size: 16px; }
+.modal-card .btn-row { align-items: center; }
+.modal-card .spacer { flex: 1; }
+.req {
+  font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 4px;
+  background: var(--surface-2); color: var(--critical); margin-left: 4px;
+}
+
+/* ---------- ホーム画面から起動したとき（ノッチ等の安全域を避ける） ---------- */
+@media (display-mode: standalone) {
+  header { padding-top: env(safe-area-inset-top); }
+  main { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+  footer { padding-bottom: calc(40px + env(safe-area-inset-bottom)); }
+}
+
 @media print {
   header, .btn-row, .tabs, .chart-tip { display: none; }
   .chart-table[open] summary { display: none; }

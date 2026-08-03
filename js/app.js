@@ -993,9 +993,19 @@
       $('saveStatus').className = 'status-line bad';
       return;
     }
+    var who = Store.athleteById($('fAthlete').value);
+    if (!who) {
+      $('saveStatus').textContent = Store.roster().length
+        ? '「選手」を選んでから保存してください。誰の記録か分からなくなります。'
+        : '先に「＋ 初めての人はここで登録」から選手を登録してください。';
+      $('saveStatus').className = 'status-line bad';
+      $('fAthlete').scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
     var rec = {
       date: $('fDate').value || new Date().toISOString().slice(0, 10),
-      athlete: $('fAthlete').value.trim(),
+      athleteId: who.id,
+      athlete: who.name,
       exercise: $('fExercise').value.trim() || 'その他',
       loadKg: Number($('fLoad').value) || 0,
       extraKg: Number($('fExtra').value) || 0,
@@ -1014,19 +1024,165 @@
       })
     };
     Store.add(rec);
-    $('saveStatus').textContent = '保存しました（' + rec.date + ' ' + rec.exercise + ' ' + rec.loadKg + 'kg）。「履歴と推移」タブで確認できます。';
+    $('saveStatus').textContent = '保存しました（' + rec.athlete + '／' + rec.date + ' '
+      + rec.exercise + ' ' + rec.loadKg + 'kg）。「履歴と推移」タブで確認できます。';
     $('saveStatus').className = 'status-line ok';
-    refreshDatalists();
+  });
+
+  /* ================= 選手（名簿） =================
+   * 端末ごとに名簿を持つ。初めての人だけ登録し、以後はプルダウンで選ぶ。
+   * 人数が増えても探しやすいよう、選択肢は学年でグループ分けする。 */
+
+  function gradeGroups(list) {
+    var order = Store.GRADES.slice();
+    var groups = {}, extras = [];
+    list.forEach(function (a) {
+      var g = a.grade || '';
+      if (!groups[g]) { groups[g] = []; if (order.indexOf(g) < 0) extras.push(g); }
+      groups[g].push(a);
+    });
+    return order.concat(extras).filter(function (g) { return groups[g]; })
+      .map(function (g) { return { label: g || '学年なし', items: groups[g] }; });
+  }
+
+  function renderAthleteSelect() {
+    var sel = $('fAthlete');
+    var list = Store.roster();
+    var cur = Store.currentAthleteId();
+    sel.textContent = '';
+
+    if (!list.length) {
+      var none = document.createElement('option');
+      none.value = ''; none.textContent = '（まだ誰も登録されていません）';
+      sel.appendChild(none);
+    } else {
+      var ph = document.createElement('option');
+      ph.value = ''; ph.textContent = '— 選んでください —';
+      sel.appendChild(ph);
+      gradeGroups(list).forEach(function (grp) {
+        var og = document.createElement('optgroup');
+        og.label = grp.label;
+        grp.items.forEach(function (a) {
+          var o = document.createElement('option');
+          o.value = a.id;
+          o.textContent = a.sex && a.sex !== '回答しない' ? a.name + '（' + a.sex + '）' : a.name;
+          og.appendChild(o);
+        });
+        sel.appendChild(og);
+      });
+      if (Store.athleteById(cur)) sel.value = cur;
+    }
+    $('editAthleteBtn').disabled = !sel.value;
+    updateWho();
+  }
+
+  function updateWho() {
+    var a = Store.currentAthlete();
+    var btn = $('whoBtn');
+    $('whoName').textContent = a ? Store.athleteLabel(a) : '選手を選ぶ';
+    btn.classList.toggle('unset', !a);
+  }
+
+  $('fAthlete').addEventListener('change', function () {
+    Store.setCurrentAthlete(this.value);
+    $('editAthleteBtn').disabled = !this.value;
+    updateWho();
+  });
+
+  // ヘッダーの名前を押したら、選手の欄まで連れて行く
+  $('whoBtn').addEventListener('click', function () {
+    if (!Store.roster().length) { openAthleteModal(null); return; }
+    showTab('analyze');
+    $('fAthlete').scrollIntoView({ block: 'center', behavior: 'smooth' });
+    $('fAthlete').focus();
+  });
+
+  /* ---------- 登録・編集モーダル ---------- */
+  var amEditingId = null;
+
+  function fillOptions(sel, values, includeBlank) {
+    sel.textContent = '';
+    if (includeBlank) {
+      var b = document.createElement('option');
+      b.value = ''; b.textContent = '未設定';
+      sel.appendChild(b);
+    }
+    values.forEach(function (v) {
+      var o = document.createElement('option'); o.value = v; o.textContent = v; sel.appendChild(o);
+    });
+  }
+
+  function openAthleteModal(id, firstRun) {
+    amEditingId = id || null;
+    fillOptions($('amGrade'), Store.GRADES, true);
+    fillOptions($('amSex'), Store.SEXES, true);
+    var a = id ? Store.athleteById(id) : null;
+    $('amTitle').textContent = a ? '選手の情報を直す' : '選手を登録';
+    $('amHint').textContent = firstRun
+      ? 'はじめまして。記録を誰のものか区別するため、最初に一度だけ入力してください。次回からはプルダウンで選ぶだけです。'
+      : (a ? '学年が上がったときなどに変更してください。過去の記録は消えません。'
+           : '名前・学年・性別を入力してください。次回からはプルダウンで選ぶだけです。');
+    $('amName').value = a ? a.name : '';
+    $('amGrade').value = a ? (a.grade || '') : '';
+    $('amSex').value = a ? (a.sex || '') : '';
+    $('amDelete').hidden = !a;
+    $('amError').hidden = true;
+    $('athleteModal').hidden = false;
+    setTimeout(function () { $('amName').focus(); }, 30);
+  }
+
+  function closeAthleteModal() { $('athleteModal').hidden = true; amEditingId = null; }
+
+  function amFail(msg) {
+    $('amError').textContent = msg;
+    $('amError').hidden = false;
+  }
+
+  $('newAthleteBtn').addEventListener('click', function () { openAthleteModal(null); });
+  $('editAthleteBtn').addEventListener('click', function () {
+    if ($('fAthlete').value) openAthleteModal($('fAthlete').value);
+  });
+  $('amCancel').addEventListener('click', closeAthleteModal);
+  $('athleteModal').addEventListener('click', function (e) {
+    if (e.target === this) closeAthleteModal();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !$('athleteModal').hidden) closeAthleteModal();
+  });
+  $('amName').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); $('amSave').click(); }
+  });
+
+  $('amSave').addEventListener('click', function () {
+    var name = $('amName').value.trim();
+    if (!name) { amFail('名前を入力してください。'); return; }
+    try {
+      var a = amEditingId
+        ? Store.updateAthlete(amEditingId, { name: name, grade: $('amGrade').value, sex: $('amSex').value })
+        : Store.addAthlete({ name: name, grade: $('amGrade').value, sex: $('amSex').value });
+      Store.setCurrentAthlete(a.id);
+      closeAthleteModal();
+      renderAthleteSelect();
+      renderHistory();
+    } catch (err) {
+      amFail(err.message);
+    }
+  });
+
+  $('amDelete').addEventListener('click', function () {
+    var a = amEditingId ? Store.athleteById(amEditingId) : null;
+    if (!a) return;
+    var n = Store.load().filter(function (r) { return r.athleteId === a.id; }).length;
+    if (!confirm(a.name + ' を名簿から削除します。'
+      + (n ? '\n※ 記録 ' + n + '件はそのまま残ります（選手なしの扱いになります）。' : '')
+      + '\nよろしいですか？')) return;
+    Store.removeAthlete(a.id);
+    closeAthleteModal();
+    renderAthleteSelect();
+    renderHistory();
   });
 
   /* ================= 履歴 ================= */
-  function refreshDatalists() {
-    var dl = $('athleteList');
-    dl.textContent = '';
-    Store.athletes().forEach(function (a) {
-      var o = document.createElement('option'); o.value = a; dl.appendChild(o);
-    });
-  }
 
   function fillSelect(sel, values, keep) {
     var cur = keep ? sel.value : '';
@@ -1040,9 +1196,27 @@
     if (values.indexOf(cur) >= 0) sel.value = cur;
   }
 
-  ['hRange', 'hAthlete', 'hExercise', 'hMetric'].forEach(function (id) {
+  ['hRange', 'hGrade', 'hSex', 'hAthlete', 'hExercise', 'hMetric'].forEach(function (id) {
     $(id).addEventListener('change', renderHistory);
   });
+
+  var UNSET = '（未設定）';
+
+  // 学年・性別の絞り込みは名簿の「いまの」情報で判定する（記録時点の値ではない）
+  function rosterMatching() {
+    var g = $('hGrade').value, s = $('hSex').value;
+    return Store.roster().filter(function (a) {
+      if (g && (a.grade || UNSET) !== g) return false;
+      if (s && (a.sex || UNSET) !== s) return false;
+      return true;
+    });
+  }
+
+  // 未記入の人が絞り込みで見えなくならないよう、いる場合だけ「（未設定）」を出す
+  function filterValues(base, key) {
+    var hasBlank = Store.roster().some(function (a) { return !a[key]; });
+    return hasBlank ? base.concat([UNSET]) : base;
+  }
 
   function filtered() {
     var days = Number($('hRange').value);
@@ -1052,9 +1226,15 @@
       var d = new Date(); d.setDate(d.getDate() - days);
       cutoff = d.toISOString().slice(0, 10);
     }
+    var allowed = null;
+    if ($('hGrade').value || $('hSex').value) {
+      allowed = {};
+      rosterMatching().forEach(function (a) { allowed[a.id] = 1; });
+    }
     return Store.load().filter(function (r) {
       if (cutoff && r.date < cutoff) return false;
-      if (ath && r.athlete !== ath) return false;
+      if (allowed && !allowed[r.athleteId]) return false;
+      if (ath && r.athleteId !== ath) return false;
       if (ex && r.exercise !== ex) return false;
       return true;
     });
@@ -1065,11 +1245,36 @@
     return Math.max.apply(null, rec.reps.map(function (x) { return x[key]; }));
   }
 
+  // 選手のプルダウンは値がID・表示が名前なので、汎用の fillSelect とは別に組む
+  function fillAthleteFilter() {
+    var sel = $('hAthlete');
+    var cur = sel.value;
+    sel.textContent = '';
+    var all = document.createElement('option');
+    all.value = ''; all.textContent = 'すべて';
+    sel.appendChild(all);
+    var list = rosterMatching();
+    var found = false;
+    gradeGroups(list).forEach(function (grp) {
+      var og = document.createElement('optgroup');
+      og.label = grp.label;
+      grp.items.forEach(function (a) {
+        var o = document.createElement('option');
+        o.value = a.id; o.textContent = a.name;
+        if (a.id === cur) found = true;
+        og.appendChild(o);
+      });
+      sel.appendChild(og);
+    });
+    sel.value = found ? cur : ''; // 学年・性別の絞り込みで消えた選手は「すべて」に戻す
+  }
+
   function renderHistory() {
     var all = Store.load();
-    fillSelect($('hAthlete'), Store.athletes(), true);
+    fillSelect($('hGrade'), filterValues(Store.GRADES, 'grade'), true);
+    fillSelect($('hSex'), filterValues(Store.SEXES, 'sex'), true);
+    fillAthleteFilter();
     fillSelect($('hExercise'), Store.exercises(), true);
-    refreshDatalists();
 
     var list = filtered();
     var metric = $('hMetric').value;
@@ -1333,9 +1538,36 @@
     renderHistory();
   });
 
+  /* ================= PWA ================= */
+  (function () {
+    // Service Worker は https（または localhost）でのみ登録できる。
+    // ファイルを直接開いた場合は何もしない。
+    if ('serviceWorker' in navigator && location.protocol === 'https:') {
+      navigator.serviceWorker.register('sw.js').catch(function () { /* 失敗しても本体は動く */ });
+    }
+    var deferred = null;
+    global.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      deferred = e;
+      $('installBtn').hidden = false;
+    });
+    $('installBtn').addEventListener('click', function () {
+      if (!deferred) return;
+      deferred.prompt();
+      deferred.userChoice.then(function () { deferred = null; $('installBtn').hidden = true; });
+    });
+    global.addEventListener('appinstalled', function () {
+      deferred = null;
+      $('installBtn').hidden = true;
+    });
+  })();
+
   /* ================= 初期化 ================= */
   $('fDate').value = new Date().toISOString().slice(0, 10);
-  refreshDatalists();
+  Store.migrateLegacyAthletes();   // 名簿導入前の記録を名簿に取り込む
+  renderAthleteSelect();
+  // この端末で誰も登録されていなければ、最初に一度だけ登録してもらう
+  if (!Store.roster().length) setTimeout(function () { openAthleteModal(null, true); }, 400);
   syncModeButtons();
   setSource('file');
   if (camSupported) {

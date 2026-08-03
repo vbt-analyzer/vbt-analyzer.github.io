@@ -1,0 +1,17 @@
+{
+  "name": "VBT Analyzer — 挙上速度・パワー解析",
+  "short_name": "VBT Analyzer",
+  "description": "ウエイトトレーニングの動画から挙上速度とパワーを算出し、推移をグラフ化する。動画も記録も端末外に送信しない。",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#fcfcfb",
+  "theme_color": "#2a78d6",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

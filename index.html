@@ -5,7 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VBT Analyzer — 挙上速度・パワー解析</title>
 <meta name="description" content="ウエイトトレーニングの動画から挙上速度とパワーを算出し、推移をグラフ化する。ブラウザだけで動作し、動画は端末外に送信しない。">
-<link rel="stylesheet" href="css/style.css?v=14">
+<link rel="stylesheet" href="css/style.css?v=17">
+
+<!-- PWA（ホーム画面に追加してアプリのように使う） -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#2a78d6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a19" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="VBT Analyzer">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
 </head>
 <body>
 
@@ -13,7 +24,11 @@
   <div class="head-row">
     <div class="brand">VBT Analyzer<small>挙上速度・パワー解析</small></div>
     <div class="spacer"></div>
-    <button class="btn" id="themeBtn" type="button" title="表示テーマを切り替える">◐ テーマ</button>
+    <button class="btn who" id="whoBtn" type="button" title="使う人を切り替える">
+      <span id="whoName">選手を選ぶ</span>
+    </button>
+    <button class="btn" id="installBtn" type="button" hidden title="ホーム画面に追加する">＋ インストール</button>
+    <button class="btn" id="themeBtn" type="button" title="表示テーマを切り替える">◐</button>
   </div>
   <nav class="tabs" role="tablist">
     <button role="tab" id="tab-analyze" aria-controls="panel-analyze" aria-selected="true">解析</button>
@@ -129,12 +144,16 @@
     <h2><span class="step-no">4</span>セット情報</h2>
     <div class="grid">
       <label class="field">日付<input type="date" id="fDate"></label>
-      <label class="field">選手名<input type="text" id="fAthlete" list="athleteList" placeholder="例: 山田"></label>
+      <label class="field">選手<select id="fAthlete"></select></label>
       <label class="field">種目
         <input type="text" id="fExercise" list="exerciseList" value="バックスクワット">
       </label>
       <label class="field">バー重量 (kg)<input type="number" id="fLoad" value="60" min="0" step="0.5"></label>
       <label class="field">追加システム質量 (kg)<input type="number" id="fExtra" value="0" min="0" step="0.5"></label>
+    </div>
+    <div class="mode-row" style="margin-top:6px">
+      <button class="btn" id="newAthleteBtn" type="button">＋ 初めての人はここで登録</button>
+      <button class="btn" id="editAthleteBtn" type="button" disabled>選んだ人の情報を直す</button>
     </div>
     <p class="hint small">追加システム質量：スクワットなどで体重の一部を加味したい場合に入力します。0のままならバー重量だけで力とパワーを計算します（一般的なVBT表示と同じ）。</p>
     <label class="field" style="margin-top:8px">メモ<textarea id="fNote" placeholder="コンディション、狙いなど"></textarea></label>
@@ -147,7 +166,6 @@
       <option value="パワークリーン"></option>
       <option value="スナッチ"></option>
     </datalist>
-    <datalist id="athleteList"></datalist>
 
     <details style="margin-top:12px">
       <summary class="hint" style="cursor:pointer">解析の詳細設定</summary>
@@ -235,6 +253,8 @@
         <option value="180">直近180日</option>
       </select>
     </label>
+    <label class="field">学年<select id="hGrade"><option value="">すべて</option></select></label>
+    <label class="field">性別<select id="hSex"><option value="">すべて</option></select></label>
     <label class="field">選手<select id="hAthlete"><option value="">すべて</option></select></label>
     <label class="field">種目<select id="hExercise"><option value="">すべて</option></select></label>
     <label class="field">推移の指標
@@ -336,6 +356,28 @@
   </div>
 
   <div class="card">
+    <h2>ホーム画面に追加する</h2>
+    <p class="hint">追加しておくと、アイコンから一発で開けて、アドレスバーの無い全画面で動きます。通信が無い場所でも起動します。</p>
+    <ul class="hint" style="padding-left:1.2em">
+      <li><strong>iPhone / iPad（Safari）</strong>：下部の共有ボタン <span aria-hidden="true">□↑</span> →「ホーム画面に追加」</li>
+      <li><strong>Android（Chrome）</strong>：右上の「⋮」→「アプリをインストール」または「ホーム画面に追加」。画面右上の「＋ インストール」ボタンからでも追加できます</li>
+      <li><strong>パソコン（Chrome / Edge）</strong>：アドレスバー右端のインストールアイコン、または「＋ インストール」ボタン</li>
+    </ul>
+    <p class="hint small">※ カメラ撮影と同じく、これも https で開いたときだけ使えます。</p>
+  </div>
+
+  <div class="card">
+    <h2>選手の登録について</h2>
+    <p class="hint">記録を誰のものか区別するために、<strong>初めて使う人だけ</strong>名前・学年・性別を登録します。2回目以降はプルダウンから自分を選ぶだけです。</p>
+    <ul class="hint" style="padding-left:1.2em">
+      <li>登録した内容は<strong>この端末のブラウザ内だけ</strong>に保存されます。別の端末で使うときは、その端末でもう一度登録が必要です</li>
+      <li>共用のタブレット等で複数人が使う場合は、<strong>記録の前に画面右上の名前が自分になっているか</strong>を必ず確認してください</li>
+      <li>学年が上がったら「選んだ人の情報を直す」から変更できます。過去の記録は消えません</li>
+      <li>性別は「回答しない」を選べます。絞り込みに使わないだけで、記録の中身は変わりません</li>
+    </ul>
+  </div>
+
+  <div class="card">
     <h2>うまく追跡できないとき</h2>
     <ul class="hint" style="padding-left:1.2em">
       <li><strong>網かけが背景まで広がる</strong>：彩度の下限を上げる、色相の許容幅を狭める。それでも駄目なら背景に無い色のテープに変える。</li>
@@ -354,11 +396,34 @@
 
 <video id="videoEl" class="hidden-src" playsinline muted preload="auto"></video>
 
+<!-- ============================= 選手の登録・選択 ============================= -->
+<div class="modal" id="athleteModal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="amTitle">
+    <h2 id="amTitle">選手を登録</h2>
+    <p class="hint" id="amHint">名前・学年・性別を入力してください。次回からはプルダウンで選ぶだけです。</p>
+    <label class="field">名前 <span class="req">必須</span>
+      <input type="text" id="amName" placeholder="例: 山田太郎" autocomplete="name">
+    </label>
+    <div class="grid" style="margin-top:10px">
+      <label class="field">学年<select id="amGrade"></select></label>
+      <label class="field">性別<select id="amSex"></select></label>
+    </div>
+    <p class="status-line bad" id="amError" hidden></p>
+    <div class="btn-row">
+      <button class="btn primary" id="amSave" type="button">保存</button>
+      <button class="btn" id="amCancel" type="button">やめる</button>
+      <div class="spacer"></div>
+      <button class="btn danger" id="amDelete" type="button" hidden>この人を削除</button>
+    </div>
+    <p class="hint small">登録内容はこの端末のブラウザ内だけに保存されます。</p>
+  </div>
+</div>
+
 <!-- ?v= はキャッシュ対策。ファイルを更新したらこの番号を上げること -->
-<script src="js/kinematics.js?v=14"></script>
-<script src="js/tracker.js?v=14"></script>
-<script src="js/charts.js?v=14"></script>
-<script src="js/storage.js?v=14"></script>
-<script src="js/app.js?v=14"></script>
+<script src="js/kinematics.js?v=17"></script>
+<script src="js/tracker.js?v=17"></script>
+<script src="js/charts.js?v=17"></script>
+<script src="js/storage.js?v=17"></script>
+<script src="js/app.js?v=17"></script>
 </body>
 </html>
