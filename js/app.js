@@ -919,10 +919,22 @@
       setT.appendChild(tile('速度低下率', fmt(sum.velocityLoss, 1), ' %'));
       setT.appendChild(tile('平均可動域', fmt(sum.meanRom * 100, 1), ' cm'));
 
-      bestT.appendChild(tile('速度（' + sum.bestRep + '本目）', fmt(sum.bestVelocity, 2), ' m/s'));
-      bestT.appendChild(tile('最大パワー', fmt(sum.peakPower, 0), ' W'));
-      bestT.appendChild(tile('最終レップの速度', fmt(sum.lastVelocity, 2), ' m/s'));
-      bestT.appendChild(tile('最速との差', fmt(sum.bestVelocity - sum.lastVelocity, 2), ' m/s'));
+      /* この欄はすべて「最速レップ1本の中の値」で揃える。
+       * セット全体の最大パワーが別のレップだった場合だけ、下に注記を出す。 */
+      var b = sum.best;
+      $('bestGroupTitle').textContent =
+        '最速レップ（' + sum.bestRep + '本目・疲労前の実力）';
+      bestT.appendChild(tile('平均推進速度', fmt(b.propulsiveVelocity, 2), ' m/s'));
+      bestT.appendChild(tile('最高速度（瞬間）', fmt(b.peakVelocity, 2), ' m/s'));
+      bestT.appendChild(tile('最大パワー（瞬間）', fmt(b.peakPower, 0), ' W'));
+      bestT.appendChild(tile('最終レップとの差', fmt(sum.bestVelocity - sum.lastVelocity, 2), ' m/s'));
+
+      $('bestNote').textContent = sum.reps < 2 ? ''
+        : sum.peakPowerRep === sum.bestRep
+          ? 'このセットで最もパワーが出たのも、このレップでした。'
+          : 'このセットで最もパワーが出たのは ' + sum.peakPowerRep + '本目（'
+            + fmt(sum.peakPower, 0) + ' W）で、最速レップとは別でした。'
+            + '立ち上がりの鋭さが違うと、こうなることがあります。';
     }
 
     var bands = r.out.reps.map(function (rep, i) {

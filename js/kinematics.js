@@ -333,10 +333,16 @@
     function mean(k) {
       return metrics.reduce(function (a, x) { return a + x[k]; }, 0) / n;
     }
-    var bestIdx = 0, worstIdx = 0;
+    /* 代表レップは MPV で選ぶ。最高速度で選ぶと単一サンプルの当たり外れで
+     * 代表が入れ替わってしまうため。
+     * なお「最速のレップ」と「最もパワーが出たレップ」は一致するとは限らない。
+     * パワー = 質量 ×（加速度 + g）× 速度 なので、MPVがわずかに低くても
+     * 立ち上がりの鋭いレップが瞬間パワーで上回ることがある。両方を返す。 */
+    var bestIdx = 0, worstIdx = 0, powIdx = 0;
     for (var i = 1; i < n; i++) {
       if (metrics[i].propulsiveVelocity > metrics[bestIdx].propulsiveVelocity) bestIdx = i;
       if (metrics[i].propulsiveVelocity < metrics[worstIdx].propulsiveVelocity) worstIdx = i;
+      if (metrics[i].peakPower > metrics[powIdx].peakPower) powIdx = i;
     }
     return {
       reps: n,
@@ -345,6 +351,8 @@
       meanPeakVelocity: mean('peakVelocity'),     // 参考: 各レップの最高速度の平均
       bestVelocity: metrics[bestIdx].propulsiveVelocity,
       bestRep: bestIdx + 1,
+      best: metrics[bestIdx],            // 最速レップの全指標（瞬間値もここから取る）
+      peakPowerRep: powIdx + 1,          // セット中で最もパワーが出たレップ（最速とは限らない）
       lastVelocity: metrics[n - 1].propulsiveVelocity,
       slowestVelocity: metrics[worstIdx].propulsiveVelocity,
       velocityLoss: velocityLoss(metrics),

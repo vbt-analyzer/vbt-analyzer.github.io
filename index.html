@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VBT Analyzer — 挙上速度・パワー解析</title>
 <meta name="description" content="ウエイトトレーニングの動画から挙上速度とパワーを算出し、推移をグラフ化する。ブラウザだけで動作し、動画は端末外に送信しない。">
-<link rel="stylesheet" href="css/style.css?v=20">
+<link rel="stylesheet" href="css/style.css?v=21">
 
 <!-- PWA（ホーム画面に追加してアプリのように使う） -->
 <link rel="manifest" href="manifest.webmanifest">
@@ -228,8 +228,9 @@
       <h2>結果</h2>
       <h3 class="group-title">セット全体</h3>
       <div class="tiles" id="setTiles"></div>
-      <h3 class="group-title">最速レップ（疲労前の実力）</h3>
+      <h3 class="group-title" id="bestGroupTitle">最速レップ（疲労前の実力）</h3>
       <div class="tiles" id="bestTiles"></div>
+      <p class="hint small" id="bestNote"></p>
 
       <div id="chartVel"></div>
       <div id="chartPow"></div>
@@ -552,10 +553,10 @@
 </div>
 
 <!-- ?v= はキャッシュ対策。ファイルを更新したらこの番号を上げること -->
-<script src="js/kinematics.js?v=20"></script>
-<script src="js/tracker.js?v=20"></script>
-<script src="js/charts.js?v=20"></script>
-<script src="js/storage.js?v=20"></script>
-<script src="js/app.js?v=20"></script>
+<script src="js/kinematics.js?v=21"></script>
+<script src="js/tracker.js?v=21"></script>
+<script src="js/charts.js?v=21"></script>
+<script src="js/storage.js?v=21"></script>
+<script src="js/app.js?v=21"></script>
 </body>
 </html>
