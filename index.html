@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VBT Analyzer — 挙上速度・パワー解析</title>
 <meta name="description" content="ウエイトトレーニングの動画から挙上速度とパワーを算出し、推移をグラフ化する。ブラウザだけで動作し、動画は端末外に送信しない。">
-<link rel="stylesheet" href="css/style.css?v=24">
+<link rel="stylesheet" href="css/style.css?v=25">
 
 <!-- PWA（ホーム画面に追加してアプリのように使う） -->
 <link rel="manifest" href="manifest.webmanifest">
@@ -48,6 +48,24 @@
       <button class="btn primary" id="srcFileBtn" type="button">動画ファイルを使う</button>
       <button class="btn" id="srcCamBtn" type="button">カメラで撮る</button>
     </div>
+
+    <details class="guide-box" id="shootGuide" open>
+      <summary>撮影のしかた（推奨条件）</summary>
+      <ul>
+        <li><strong>距離とズームは自由です。</strong>較正で実寸を教えるので、遠近やズーム倍率は結果に影響しません。
+          ただし<strong>マーカーが小さく写るほど数値が荒れます</strong>。バーの動く範囲が画面の縦半分ほどを占めるのが目安。
+          解析後に実際の写り具合を判定して出します</li>
+        <li><strong>高さはバーの動く範囲の中央あたり。</strong>理想レンズなら高さは尺度に影響しませんが、
+          画面の端はレンズ歪みが出やすいので、バーの軌道が画面中央を通るようにします</li>
+        <li><strong>カメラを上下に傾けない。</strong>傾けると縦方向の尺度が画面内の位置で変わり、
+          <strong>これは較正では直せません</strong>。水平に構えて、高さで合わせてください</li>
+        <li><strong>正対が理想。</strong>斜めからでも縦方向の測定自体は狂いませんが、
+          <strong>較正の線は縦向きに引いてください</strong>（プレートの直径を上下方向に）。
+          横向きに引くと斜めのぶん縮んで写り、速度が小さく出ます</li>
+        <li><strong>三脚などで固定。</strong>手持ちは不可。撮影中に動かすと較正がずれます</li>
+        <li><strong>60fps以上を推奨。</strong>平均値は30fpsでもよく合いますが、最大値は撮影fpsに強く依存します</li>
+      </ul>
+    </details>
 
     <div id="srcFilePane">
       <p class="hint">バーの端に貼った目印（蛍光テープなど）が全レップ映っている動画を選びます。動画は端末内で処理され、どこにも送信されません。</p>
@@ -224,6 +242,7 @@
   <div id="results" hidden>
     <div class="card">
       <h2>結果</h2>
+      <p class="status-line" id="qualityStatus"></p>
       <h3 class="group-title">セット全体</h3>
       <div class="tiles" id="setTiles"></div>
       <h3 class="group-title" id="bestGroupTitle">最速レップ（疲労前の実力）</h3>
@@ -551,10 +570,10 @@
 </div>
 
 <!-- ?v= はキャッシュ対策。ファイルを更新したらこの番号を上げること -->
-<script src="js/kinematics.js?v=24"></script>
-<script src="js/tracker.js?v=24"></script>
-<script src="js/charts.js?v=24"></script>
-<script src="js/storage.js?v=24"></script>
-<script src="js/app.js?v=24"></script>
+<script src="js/kinematics.js?v=25"></script>
+<script src="js/tracker.js?v=25"></script>
+<script src="js/charts.js?v=25"></script>
+<script src="js/storage.js?v=25"></script>
+<script src="js/app.js?v=25"></script>
 </body>
 </html>

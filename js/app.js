@@ -368,10 +368,25 @@
     S.metersPerPixel = (mm / 1000) / dist;
     var pe = previewEl();
     S.calibSize = [pe.videoWidth, pe.videoHeight]; // 録画に引き継ぐ際の整合性チェック用
-    $('calibStatus').textContent =
-      '較正済み： ' + dist.toFixed(1) + 'px = ' + mm + 'mm（1px = ' +
+    var base = '較正済み： ' + dist.toFixed(1) + 'px = ' + mm + 'mm（1px = ' +
       (S.metersPerPixel * 1000).toFixed(2) + 'mm）';
-    $('calibStatus').className = 'status-line ok';
+
+    /* 較正の線の向きを見る。
+     * カメラが正対していないと横方向は cos のぶん縮んで写るため、横向きの基準で
+     * 較正すると m/px を小さく見積もり、速度もパワーも小さく出る。
+     * 縦方向は水平回転の影響を受けないので、縦向きに引いてもらうのが安全。 */
+    var tilt = Math.atan2(Math.abs(dx), Math.abs(dy)) * 180 / Math.PI; // 0°=完全に縦
+    if (tilt > 60) {
+      $('calibStatus').textContent = base
+        + '　※較正の線が横向きです。カメラが正対していれば問題ありませんが、'
+        + '斜めから撮っている場合は横方向が縮んで写るため速度が小さく出ます。'
+        + 'プレートの直径を「縦向き」に測り直すと、この影響を受けません。';
+      $('calibStatus').className = 'status-line warn';
+    } else {
+      $('calibStatus').textContent = base
+        + (tilt <= 30 ? '　縦向きに引かれているので、カメラの向きの影響を受けません。' : '');
+      $('calibStatus').className = 'status-line ok';
+    }
     updateRunButton();
   }
 
@@ -762,6 +777,7 @@
     if (!cfg || !S.metersPerPixel) return;
     stopCameraPreview();   // 解析中は videoEl から描画する
     cfg.procWidth = Number($('oProcWidth').value);
+    S.procWidth = cfg.procWidth;
     cfg.searchRadius = Number($('oRadius').value);
     cfg.minPixels = 10;
     cfg.playbackRate = Number($('oRate').value);
@@ -853,7 +869,8 @@
 
     S.result = {
       out: out, samples: samples, loadKg: loadKg, extraKg: extraKg,
-      slowFactor: slow, trackRate: okCount / samples.length
+      slowFactor: slow, trackRate: okCount / samples.length,
+      quality: assessShooting(samples, okCount)
     };
 
     var lost = samples.length - okCount;
@@ -890,6 +907,54 @@
     }
   }
 
+  /* ---------- 撮影条件の判定 ----------
+   * 距離・ズーム・高さは較正が吸収するので入力させる必要が無い。
+   * 代わりに「実際どう写ったか」を映像から測って、次の撮影の指針にする。
+   *   markerPx : マーカーの一辺（処理解像度でのピクセル数）。追跡の分解能そのもの
+   *   travelPct: バーの移動量が画面の高さに占める割合。小さいほど相対誤差が効く */
+  function assessShooting(samples, okCount) {
+    var ok = samples.filter(function (s) { return s.ok; });
+    if (!ok.length) return null;
+    var ns = ok.map(function (s) { return s.n; }).sort(function (a, b) { return a - b; });
+    var medN = ns[Math.floor(ns.length / 2)];
+    var ys = ok.map(function (s) { return s.y; });
+    var travelPx = Math.max.apply(null, ys) - Math.min.apply(null, ys);
+    var vh = videoEl.videoHeight || 1;
+    return {
+      markerPx: Math.sqrt(medN),
+      travelPct: travelPx / vh * 100,
+      detectPct: okCount / samples.length * 100,
+      fps: S.fpsEstimate ? S.fpsEstimate * (S.source === 'camera' ? 1 : 1) : null
+    };
+  }
+
+  function renderQuality() {
+    var q = S.result && S.result.quality;
+    var el = $('qualityStatus');
+    if (!q) { el.textContent = ''; return; }
+    var tips = [];
+    if (q.markerPx < 5) tips.push('マーカーが小さすぎます（' + q.markerPx.toFixed(1)
+      + 'px相当）。近づくかズームするか、目印を大きく貼ってください');
+    else if (q.markerPx < 8) tips.push('マーカーがやや小さめです（' + q.markerPx.toFixed(1) + 'px相当）');
+    if (q.travelPct < 20) tips.push('バーの動きが画面の' + q.travelPct.toFixed(0)
+      + '%しかありません。もっと寄って撮ると数値が安定します');
+    else if (q.travelPct < 35) tips.push('バーの動きが画面の' + q.travelPct.toFixed(0) + '%です。もう少し寄れます');
+    if (q.detectPct < 98) tips.push('追跡が途切れた区間があります（検出率 '
+      + q.detectPct.toFixed(1) + '%）。しきい値か照明を見直してください');
+    if (q.fps && q.fps < 50) tips.push('実効 ' + q.fps.toFixed(0)
+      + 'fps です。平均値は問題ありませんが、最大値は低めに出ます');
+
+    if (!tips.length) {
+      el.textContent = '撮影条件は良好です（マーカー ' + q.markerPx.toFixed(1) + 'px相当、'
+        + 'バーの動き 画面の' + q.travelPct.toFixed(0) + '%、検出率 ' + q.detectPct.toFixed(1) + '%'
+        + (q.fps ? '、実効 ' + q.fps.toFixed(0) + 'fps' : '') + '）。';
+      el.className = 'status-line ok';
+    } else {
+      el.textContent = '撮影条件の見直し： ' + tips.join('／') + '。';
+      el.className = 'status-line warn';
+    }
+  }
+
   /* ================= 結果表示 ================= */
   function tile(label, value, unit, hero) {
     var d = document.createElement('div');
@@ -909,6 +974,7 @@
 
     /* セットの要約。速度の代表値はMPV基準で揃える（理由は kinematics.js の setSummary 参照）。
      * 「セット平均」だけでは判断材料として弱いので、最速レップと速度低下率を並べて出す。 */
+    renderQuality();
     var sum = Kin.setSummary(m);
     var setT = $('setTiles'), bestT = $('bestTiles');
     setT.textContent = ''; bestT.textContent = '';
