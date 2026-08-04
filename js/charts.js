@@ -433,7 +433,7 @@
       state.cfg = next || state.cfg;
       var c = state.cfg;
       dom.setHeader(c);
-      var headers = [c.xLabel || 'x'].concat(c.series.map(function (s) { return s.name; }));
+      var headers = [c.xLabelName || c.xLabel || 'x'].concat(c.series.map(function (s) { return s.name; }));
       var xsAll = {};
       c.series.forEach(function (s) { s.points.forEach(function (p) { xsAll[p.x] = 1; }); });
       var keys = Object.keys(xsAll).map(Number).sort(function (a, b) { return a - b; });
@@ -441,7 +441,9 @@
       var rows = [];
       for (var i = 0; i < keys.length; i += stride) {
         var x = keys[i];
-        rows.push([c.xFormat ? c.xFormat(x) : fmtNum(x, 2)].concat(
+        // 表では軸より詳しく書ける（軸は「7/5」、表は「7/5 10:00」など）
+        var xf = c.xTableFormat || c.xFormat;
+        rows.push([xf ? xf(x) : fmtNum(x, 2)].concat(
           c.series.map(function (s) {
             var p = nearest(s.points, x);
             return p && Math.abs(p.x - x) < 1e-6

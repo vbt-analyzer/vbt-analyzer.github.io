@@ -1197,9 +1197,10 @@
     }
     var rec = {
       date: $('fDate').value || new Date().toISOString().slice(0, 10),
+      time: $('fTime').value || nowHHMM(),
       athleteId: who.id,
       athlete: who.name,
-      exercise: $('fExercise').value.trim() || 'その他',
+      exercise: $('fExercise').value || 'その他',
       loadKg: Number($('fLoad').value) || 0,
       extraKg: Number($('fExtra').value) || 0,
       note: $('fNote').value.trim(),
@@ -1235,9 +1236,11 @@
       })
     };
     Store.add(rec);
-    $('saveStatus').textContent = '保存しました（' + rec.athlete + '／' + rec.date + ' '
+    $('saveStatus').textContent = '保存しました（' + rec.athlete + '／' + rec.date + ' ' + rec.time + ' '
       + rec.exercise + ' ' + rec.loadKg + 'kg）。「履歴と推移」タブで確認できます。';
     $('saveStatus').className = 'status-line ok';
+    // 続けて次のセットを撮ることが多いので、時刻は「いま」に進めておく
+    $('fTime').value = nowHHMM();
   });
 
   /* ================= 選手（名簿） =================
@@ -1287,6 +1290,56 @@
     updateWho();
   }
 
+  /* ---------- 種目（選手ごとに追加できる） ---------- */
+  function renderExerciseSelect() {
+    var sel = $('fExercise');
+    var id = Store.currentAthleteId();
+    var cur = sel.value;
+    var list = Store.exercisesFor(id);
+    sel.textContent = '';
+    list.forEach(function (n) {
+      var o = document.createElement('option');
+      o.value = n; o.textContent = n;
+      if (!Store.isPresetExercise(n)) o.textContent = n + '（追加）';
+      sel.appendChild(o);
+    });
+    sel.value = list.indexOf(cur) >= 0 ? cur : list[0];
+    $('addExerciseBtn').disabled = !isAuthed(id);
+  }
+
+  function exSay(msg, cls) {
+    $('exerciseStatus').textContent = msg || '';
+    $('exerciseStatus').className = 'status-line ' + (cls || '');
+  }
+
+  $('addExerciseBtn').addEventListener('click', function () {
+    $('addExerciseRow').hidden = false;
+    $('newExerciseName').value = '';
+    exSay('');
+    $('newExerciseName').focus();
+  });
+  $('addExerciseCancel').addEventListener('click', function () {
+    $('addExerciseRow').hidden = true; exSay('');
+  });
+  $('newExerciseName').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); $('addExerciseOk').click(); }
+  });
+  $('addExerciseOk').addEventListener('click', function () {
+    try {
+      var n = Store.addExerciseFor(Store.currentAthleteId(), $('newExerciseName').value);
+      $('addExerciseRow').hidden = true;
+      renderExerciseSelect();
+      $('fExercise').value = n;
+      exSay('「' + n + '」を追加しました。次回からプルダウンに出ます。', 'ok');
+      renderHistory();
+    } catch (err) { exSay(err.message, 'bad'); }
+  });
+
+  function nowHHMM() {
+    var d = new Date();
+    return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+  }
+
   function updateWho() {
     var a = Store.currentAthlete();
     var btn = $('whoBtn');
@@ -1314,6 +1367,7 @@
     if (!Store.athleteById(id)) id = '';
     $('fAthlete').value = id;
     $('editAthleteBtn').disabled = !isAuthed(id);
+    renderExerciseSelect();   // 種目は選手ごとに違うので、切り替えのたびに組み直す
     updateWho();
     updateIoButtons();
   }
@@ -1735,7 +1789,7 @@
     tl.appendChild(tile('最大パワー', fmt(bestP, 0), ' W'));
 
     /* --- 推移チャート --- */
-    renderTrend(list, metric, profile, mvt);
+    renderTrend(list, metric, profile, mvt, exSel);
 
     /* --- 荷重-速度チャート --- */
     renderLV(exSel, lvPoints, profile, mvt);
@@ -1743,143 +1797,195 @@
     /* --- MVT 設定 --- */
     renderMvtGrid();
 
-    /* --- 一覧 --- */
-    var ul = $('sessionList');
-    ul.textContent = '';
-    if (!list.length) {
-      var li0 = document.createElement('li');
-      li0.textContent = all.length ? '条件に合う記録がありません。' : 'まだ記録がありません。「解析」タブから追加してください。';
-      ul.appendChild(li0);
-    }
-    list.slice().reverse().forEach(function (r) {
-      var li = document.createElement('li');
-      var main = document.createElement('div');
-      main.className = 'sess-main';
-      var t = document.createElement('div');
-      t.textContent = r.date + '　' + r.exercise + ' ' + r.loadKg + 'kg × ' + (r.reps ? r.reps.length : 0) + '回'
-        + (r.athlete ? '　' + r.athlete : '');
-      var s = document.createElement('div');
-      s.className = 'sess-sub';
-      var rs = summaryOf(r);
-      s.textContent = (rs
-        ? '平均 ' + fmt(rs.meanVelocity, 2) + ' m/s'
-          + '　最速 ' + fmt(rs.bestVelocity, 2) + ' m/s'
-          + '　平均パワー ' + fmt(rs.meanPower, 0) + ' W'
-          + '　最大パワー ' + fmt(rs.peakPower, 0) + ' W'
-        : '')
-        + (r.trackRate != null ? '　検出率 ' + (r.trackRate * 100).toFixed(0) + '%' : '')
-        + (r.note ? '　' + r.note : '');
-      main.appendChild(t); main.appendChild(s);
-      li.appendChild(main);
-
-      var vl = Kin.velocityLoss(r.reps || []);
-      var b = document.createElement('span');
-      b.className = 'badge';
-      b.textContent = '低下 ' + fmt(vl, 0) + '%';
-      li.appendChild(b);
-
-      var del = document.createElement('button');
-      del.className = 'btn danger';
-      del.type = 'button';
-      del.textContent = '削除';
-      del.addEventListener('click', function () {
-        if (!confirm(r.date + ' ' + r.exercise + ' ' + r.loadKg + 'kg の記録を削除します。よろしいですか？')) return;
-        Store.remove(r.id);
-        renderHistory();
-      });
-      li.appendChild(del);
-      ul.appendChild(li);
-    });
+    renderSessionTable(list, all, exSel);
   }
 
-  function dayKey(d) { return new Date(d + 'T00:00:00').getTime(); }
+  /* セット単位の一覧。グラフと同じ「平均と最大」を、日時と並べて数値で読む。 */
+  function renderSessionTable(list, all, exSel) {
+    $('sessionTitle').textContent = exSel ? exSel + ' の記録' : '記録一覧';
+    $('sessionHint').textContent = exSel
+      ? '新しいものが上です。上のグラフと同じ値を数値で並べています。'
+      : '種目を1つ選ぶと、その種目だけの一覧になります。';
 
-  function renderTrend(list, metric, profile, mvt) {
-    var isE1rm = metric === 'e1rm';
-    var unitMap = {
-      meanVelocity: [' m/s', 2, 'セット平均 速度'],
-      bestVelocity: [' m/s', 2, '最速レップの速度'],
-      meanPower: [' W', 0, 'セット平均 パワー'],
-      peakPower: [' W', 0, '最大パワー（瞬間）'],
-      velocityLoss: [' %', 1, '速度低下率'],
-      e1rm: [' kg', 1, '推定1RM']
-    };
-    var info = unitMap[metric] || unitMap.meanVelocity;
+    var tbl = $('sessionTable');
+    tbl.textContent = '';
+    if (!list.length) {
+      var p = document.createElement('tbody'), tr0 = document.createElement('tr'), td0 = document.createElement('td');
+      td0.textContent = all.length ? '条件に合う記録がありません。' : 'まだ記録がありません。「解析」タブから追加してください。';
+      tr0.appendChild(td0); p.appendChild(tr0); tbl.appendChild(p);
+      return;
+    }
 
-    // 種目ごと × 日ごとに最良値を集計（同日に複数セットあれば最良を採る）
-    var byEx = {};
-    list.forEach(function (r) {
-      var v, s = summaryOf(r);
-      if (!s) return;
-      if (isE1rm) {
-        if (!profile || !profile.slope || profile.slope >= -1e-6) return;
-        v = r.loadKg + (s.bestVelocity - mvt) / (-profile.slope);
-      } else {
-        v = s[metric];
+    var multiAthlete = !$('hAthlete').value;
+    var cols = [{ h: '日時', f: function (r) { return r.date.slice(5) + ' ' + (r.time || '--:--'); } }];
+    if (multiAthlete) cols.push({ h: '選手', f: function (r) { return r.athlete || ''; } });
+    if (!exSel) cols.push({ h: '種目', f: function (r) { return r.exercise; } });
+    cols = cols.concat([
+      { h: '重量 (kg)', f: function (r) { return fmt(r.loadKg, 1); } },
+      { h: 'レップ', f: function (r) { return String((r.reps || []).length); } },
+      { h: '平均速度 (m/s)', f: function (r, s) { return fmt(s && s.meanVelocity, 2); }, hi: 'meanVelocity', avg: 'meanVelocity', d: 2 },
+      { h: '最速 (m/s)', f: function (r, s) { return fmt(s && s.bestVelocity, 2); }, hi: 'bestVelocity', avg: 'bestVelocity', d: 2 },
+      { h: '平均パワー (W)', f: function (r, s) { return fmt(s && s.meanPower, 0); }, hi: 'meanPower', avg: 'meanPower', d: 0 },
+      { h: '最大パワー (W)', f: function (r, s) { return fmt(s && s.peakPower, 0); }, hi: 'peakPower', avg: 'peakPower', d: 0 },
+      // 低下率は「大きいほど良い」ではないので、平均は出すが最大の強調はしない
+      { h: '低下率 (%)', f: function (r, s) { return fmt(s && s.velocityLoss, 1); }, avg: 'velocityLoss', d: 1 },
+      { h: '', f: null }
+    ]);
+
+    var rows = list.slice().reverse().map(function (r) { return { r: r, s: summaryOf(r) }; });
+
+    // 期間内の最高値を強調する（種目を絞っていないと種目間の比較になるので出さない）
+    var best = {};
+    if (exSel) {
+      cols.forEach(function (c) {
+        if (!c.hi) return;
+        var m = -Infinity;
+        rows.forEach(function (row) { if (row.s && row.s[c.hi] > m) m = row.s[c.hi]; });
+        best[c.hi] = m;
+      });
+    }
+
+    var thead = document.createElement('thead'), htr = document.createElement('tr');
+    cols.forEach(function (c) { var th = document.createElement('th'); th.textContent = c.h; htr.appendChild(th); });
+    thead.appendChild(htr); tbl.appendChild(thead);
+
+    var tb = document.createElement('tbody');
+    rows.forEach(function (row) {
+      var tr = document.createElement('tr');
+      cols.forEach(function (c) {
+        var td = document.createElement('td');
+        if (!c.f) {
+          var del = document.createElement('button');
+          del.className = 'btn danger'; del.type = 'button'; del.textContent = '削除';
+          del.addEventListener('click', function () {
+            if (!confirm(row.r.date + ' ' + (row.r.time || '') + ' ' + row.r.exercise + ' '
+              + row.r.loadKg + 'kg の記録を削除します。よろしいですか？')) return;
+            Store.remove(row.r.id);
+            renderHistory();
+          });
+          td.appendChild(del);
+        } else {
+          td.textContent = c.f(row.r, row.s);
+          if (c.hi && row.s && best[c.hi] != null && row.s[c.hi] === best[c.hi] && rows.length > 1) {
+            td.className = 'is-max';
+            td.title = 'この期間の最高';
+          }
+        }
+        tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    });
+    tbl.appendChild(tb);
+
+    // 最下段に平均
+    var tfoot = document.createElement('tfoot'), ftr = document.createElement('tr');
+    cols.forEach(function (c, i) {
+      var td = document.createElement('td');
+      if (i === 0) td.textContent = '平均（' + rows.length + 'セット）';
+      else if (c.avg) {
+        var vals = rows.map(function (x) { return x.s && x.s[c.avg]; })
+          .filter(function (v) { return v != null && isFinite(v); });
+        td.textContent = vals.length
+          ? fmt(vals.reduce(function (a, b) { return a + b; }, 0) / vals.length, c.d)
+          : '—';
       }
-      if (v == null || !isFinite(v)) return;
-      var k = r.exercise;
-      byEx[k] = byEx[k] || {};
-      var d = dayKey(r.date);
-      if (byEx[k][d] == null || v > byEx[k][d]) byEx[k][d] = v;
+      ftr.appendChild(td);
     });
+    tfoot.appendChild(ftr); tbl.appendChild(tfoot);
+  }
 
-    var names = Object.keys(byEx).sort(function (a, b) {
-      return Object.keys(byEx[b]).length - Object.keys(byEx[a]).length;
-    });
-    var capped = names.length > 3;
-    names = names.slice(0, 3); // カテゴリ配色は3枠まで
 
+  /* 種目を1つ選んで、その種目の推移を見る。
+   * 「平均」と「最大」を同じ単位・同じ軸で並べるので、2本の線の開きが
+   * そのままセット内でのばらつき（＝疲労の乗り方）を表す。
+   * x軸は日付ではなく日時。同じ日に複数セットあれば別々の点になる。 */
+  var TREND_SPECS = {
+    velocity: {
+      unit: ' m/s', d: 2, axis: '速度 (m/s)', title: '速度',
+      sub: 'セット平均と、そのセットで最も速かったレップ（どちらも平均推進速度）',
+      series: [{ name: 'セット平均', key: 'meanVelocity' }, { name: '最速レップ', key: 'bestVelocity' }]
+    },
+    power: {
+      unit: ' W', d: 0, axis: 'パワー (W)', title: 'パワー',
+      sub: 'セット平均（推進局面の平均）と、セット中の瞬間最大',
+      series: [{ name: 'セット平均', key: 'meanPower' }, { name: '最大・瞬間', key: 'peakPower' }]
+    },
+    velocityLoss: {
+      unit: ' %', d: 1, axis: '速度低下率 (%)', title: '速度低下率',
+      sub: '最速レップに対する最終レップの落ち幅。追い込み度合いの目安',
+      series: [{ name: '速度低下率', key: 'velocityLoss' }]
+    },
+    e1rm: {
+      unit: ' kg', d: 1, axis: '推定1RM (kg)', title: '推定1RM',
+      sub: '荷重-速度直線の傾きから各セットを1RM換算した推定値',
+      series: [{ name: '推定1RM', key: 'e1rm' }]
+    }
+  };
+
+  function fmtDateTime(ts, withTime) {
+    var d = new Date(ts);
+    var s = (d.getMonth() + 1) + '/' + d.getDate();
+    if (!withTime) return s;
+    return s + ' ' + ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+  }
+
+  function renderTrend(list, metric, profile, mvt, exSel) {
+    var spec = TREND_SPECS[metric] || TREND_SPECS.velocity;
     var st = getComputedStyle(document.documentElement);
-    var palette = [
-      st.getPropertyValue('--series-1').trim(),
-      st.getPropertyValue('--series-2').trim(),
-      st.getPropertyValue('--series-3').trim()
-    ];
+    var palette = [st.getPropertyValue('--series-1').trim(), st.getPropertyValue('--series-2').trim()];
 
-    var series = names.map(function (n, i) {
-      var days = Object.keys(byEx[n]).map(Number).sort(function (a, b) { return a - b; });
+    var rows = [];
+    if (exSel) {
+      list.forEach(function (r) {
+        var s = summaryOf(r);
+        if (!s) return;
+        rows.push({ x: Store.recordAt(r), s: s, rec: r });
+      });
+      rows.sort(function (a, b) { return a.x - b.x; });
+    }
+
+    var series = spec.series.map(function (sp, i) {
+      var pts = [];
+      rows.forEach(function (row) {
+        var v;
+        if (sp.key === 'e1rm') {
+          if (!profile || !profile.slope || profile.slope >= -1e-6) return;
+          v = row.rec.loadKg + (row.s.bestVelocity - mvt) / (-profile.slope);
+        } else {
+          v = row.s[sp.key];
+        }
+        if (v == null || !isFinite(v)) return;
+        pts.push({ x: row.x, y: v });
+      });
       return {
-        name: n,
-        color: palette[i],
-        dots: true,
-        points: days.map(function (d) { return { x: d, y: byEx[n][d] }; }),
-        endLabel: names.length === 1 ? fmt(byEx[n][days[days.length - 1]], info[1]) : ''
+        name: sp.name, color: palette[i % 2], dots: true, points: pts,
+        endLabel: pts.length ? fmt(pts[pts.length - 1].y, spec.d) : ''
       };
     }).filter(function (s) { return s.points.length; });
 
-    var sub = isE1rm
-      ? '荷重-速度直線の傾きから各セットを1RM換算した推定値（種目を1つ選ぶと算出できます）'
-      : 'セットごとの値を、日ごとに最大のもので代表させたもの';
-    if (capped) sub += '　※セット数の多い上位3種目のみ表示';
-
-    // 日付軸の目盛りは実際に記録がある日から等間隔に選ぶ（丸め数値では日付にならないため）
-    var allDays = {};
-    series.forEach(function (s) { s.points.forEach(function (p) { allDays[p.x] = 1; }); });
-    var dayList = Object.keys(allDays).map(Number).sort(function (a, b) { return a - b; });
-    var stride = Math.max(1, Math.ceil(dayList.length / 6));
+    // 目盛りは実際に記録がある日時から等間隔に選ぶ（丸め数値では日時にならないため）
+    var xs = {};
+    series.forEach(function (s) { s.points.forEach(function (p) { xs[p.x] = 1; }); });
+    var xList = Object.keys(xs).map(Number).sort(function (a, b) { return a - b; });
+    var stride = Math.max(1, Math.ceil(xList.length / 5));
     var xTicks = [];
-    for (var di = 0; di < dayList.length; di += stride) xTicks.push(dayList[di]);
-    if (dayList.length && xTicks[xTicks.length - 1] !== dayList[dayList.length - 1]) {
-      xTicks.push(dayList[dayList.length - 1]);
+    for (var i = 0; i < xList.length; i += stride) xTicks.push(xList[i]);
+    if (xList.length && xTicks[xTicks.length - 1] !== xList[xList.length - 1]) {
+      xTicks.push(xList[xList.length - 1]);
     }
 
     var cfg = {
-      title: info[2] + 'の推移',
-      subtitle: sub,
-      xLabel: '', yLabel: info[2] + ' (' + info[0].trim() + ')',
-      xTicks: xTicks,
-      unit: info[0], yDecimals: info[1], includeZero: false, height: 250,
-      xFormat: function (v) { var d = new Date(v); return (d.getMonth() + 1) + '/' + d.getDate(); },
-      tipFormat: function (v) {
-        var d = new Date(v);
-        return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
-      },
-      series: series
+      title: (exSel || '種目') + ' — ' + spec.title + 'の推移',
+      subtitle: exSel ? spec.sub + '（点1つが1セット）' : '上の絞り込みで種目を1つ選んでください',
+      emptyText: exSel ? 'この条件では記録がありません' : '種目を1つ選んでください',
+      xLabel: '', yLabel: spec.axis, xTicks: xTicks,
+      unit: spec.unit, yDecimals: spec.d, includeZero: false, height: 250,
+      xFormat: function (v) { return fmtDateTime(v, false); },
+      xTableFormat: function (v) { return fmtDateTime(v, true); },
+      xLabelName: '日時',
+      tipFormat: function (v) { return new Date(v).getFullYear() + '/' + fmtDateTime(v, true); },
+      series: exSel ? series : []
     };
-    if (!series.length) {
-      cfg.series = [];
-    }
     if (!charts.trend) charts.trend = Charts.line($('chartTrend'), cfg);
     else charts.trend.update(cfg);
   }
@@ -1927,7 +2033,10 @@
     var grid = $('mvtGrid');
     grid.textContent = '';
     var s = Store.settings();
-    var names = Object.keys(s.mvt).concat(Store.exercises().filter(function (e) { return !(e in s.mvt); }));
+    // 主要種目 → その選手が追加した種目 → 記録に出てくる種目、の順で並べる
+    var names = Store.exercisesFor(Store.currentAthleteId())
+      .concat(Store.exercises()).concat(Object.keys(s.mvt))
+      .filter(function (e, i, a) { return e && a.indexOf(e) === i; });
     names.forEach(function (name) {
       var lab = document.createElement('label');
       lab.className = 'field';
@@ -2038,6 +2147,7 @@
 
   /* ================= 初期化 ================= */
   $('fDate').value = new Date().toISOString().slice(0, 10);
+  $('fTime').value = nowHHMM();
   Store.migrateLegacyAthletes();   // 名簿導入前の記録を名簿に取り込む
   renderAthleteSelect();
   updateAdminStatus();

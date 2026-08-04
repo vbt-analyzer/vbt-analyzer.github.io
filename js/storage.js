@@ -17,11 +17,30 @@
   var GRADES = ['1年', '2年', '3年', '4年', 'その他'];
   var SEXES = ['男子', '女子', '回答しない'];
 
+  /* あらかじめ用意する主要種目。これ以外は選手ごとに追加してもらう。 */
+  var EXERCISE_PRESETS = [
+    'バックスクワット（フル）',
+    'バックスクワット（ハーフ）',
+    'バックスクワット（クォーター）',
+    'デッドリフト',
+    'ベンチプレス',
+    'クリーン'
+  ];
+
+  /* 最小速度閾値（1RMに到達したときのバー速度）の初期値。
+   * フルスクワット・ベンチ・デッドリフトは文献の代表値だが個人差が大きい。
+   * ハーフ／クォーターは可動域が違うため信頼できる代表値が無く、フルの値を仮置きしている。
+   * 実測1RMに合わせて必ず調整すること。 */
   var DEFAULT_MVT = {
+    'バックスクワット（フル）': 0.30,
+    'バックスクワット（ハーフ）': 0.30,
+    'バックスクワット（クォーター）': 0.30,
+    'デッドリフト': 0.15,
+    'ベンチプレス': 0.17,
+    'クリーン': 0.70,
+    // 以前の名前で保存された記録のための後方互換
     'バックスクワット': 0.30,
     'フロントスクワット': 0.30,
-    'ベンチプレス': 0.17,
-    'デッドリフト': 0.15,
     'ショルダープレス': 0.19,
     'パワークリーン': 0.70,
     'スナッチ': 0.75
@@ -68,8 +87,9 @@
   function clearAll() { save([]); }
 
   function cmp(a, b) {
-    if (a.date === b.date) return (a.createdAt || '') < (b.createdAt || '') ? -1 : 1;
-    return a.date < b.date ? -1 : 1;
+    var ta = recordAt(a), tb = recordAt(b);
+    if (ta !== tb) return ta < tb ? -1 : 1;
+    return (a.createdAt || '') < (b.createdAt || '') ? -1 : 1;
   }
 
   function exercises() {
@@ -204,6 +224,45 @@
     });
     if (touched) save(list);
     return touched;
+  }
+
+  /* ---------- 種目（選手ごとに追加できる） ----------
+   * 主要種目は全員共通。追加した種目はその選手に紐づいて残る。 */
+  function exercisesFor(athleteId) {
+    var a = athleteById(athleteId);
+    var own = (a && Array.isArray(a.exercises)) ? a.exercises : [];
+    var seen = {}, out = [];
+    EXERCISE_PRESETS.concat(own).forEach(function (n) {
+      if (n && !seen[n]) { seen[n] = 1; out.push(n); }
+    });
+    return out;
+  }
+
+  function isPresetExercise(name) { return EXERCISE_PRESETS.indexOf(name) >= 0; }
+
+  function addExerciseFor(athleteId, name) {
+    var n = String(name || '').trim();
+    if (!n) throw new Error('種目名を入力してください');
+    if (n.length > 24) throw new Error('種目名が長すぎます（24文字まで）');
+    var list = roster(), found = null;
+    for (var i = 0; i < list.length; i++) if (list[i].id === athleteId) found = list[i];
+    if (!found) throw new Error('選手が選ばれていません');
+    if (!Array.isArray(found.exercises)) found.exercises = [];
+    if (EXERCISE_PRESETS.indexOf(n) >= 0 || found.exercises.indexOf(n) >= 0) {
+      throw new Error('「' + n + '」はすでにあります');
+    }
+    found.exercises.push(n);
+    saveRoster(list);
+    return n;
+  }
+
+  /* ---------- 日時 ----------
+   * 記録は date（YYYY-MM-DD）と time（HH:MM）を持つ。
+   * 時刻を持たない古い記録は 00:00 として扱う。 */
+  function recordAt(rec) {
+    var t = /^\d{2}:\d{2}/.test(rec.time || '') ? rec.time.slice(0, 5) : '00:00';
+    var d = new Date(rec.date + 'T' + t + ':00');
+    return isNaN(d.getTime()) ? 0 : d.getTime();
   }
 
   /* ============================================================
@@ -375,7 +434,7 @@
   }
 
   var CSV_COLS = [
-    ['date', '日付'], ['athlete', '選手'], ['grade', '学年'], ['sex', '性別'],
+    ['date', '日付'], ['time', '時刻'], ['athlete', '選手'], ['grade', '学年'], ['sex', '性別'],
     ['exercise', '種目'], ['loadKg', '重量kg'],
     ['extraKg', '追加質量kg'], ['repNo', 'レップ'], ['rom', 'ROM_m'], ['duration', '所要秒'],
     ['meanVelocity', '平均速度MCV_m/s'], ['propulsiveVelocity', '平均推進速度MPV_m/s'],
@@ -467,6 +526,9 @@
   global.VBT = global.VBT || {};
   global.VBT.Store = {
     DEFAULT_MVT: DEFAULT_MVT, GRADES: GRADES, SEXES: SEXES,
+    EXERCISE_PRESETS: EXERCISE_PRESETS, exercisesFor: exercisesFor,
+    isPresetExercise: isPresetExercise, addExerciseFor: addExerciseFor,
+    recordAt: recordAt,
     uid: uid, load: load, save: save, add: add, remove: remove, clearAll: clearAll,
     exercises: exercises, athletes: athletes,
     roster: roster, addAthlete: addAthlete, updateAthlete: updateAthlete,

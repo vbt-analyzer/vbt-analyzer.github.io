@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VBT Analyzer — 挙上速度・パワー解析</title>
 <meta name="description" content="ウエイトトレーニングの動画から挙上速度とパワーを算出し、推移をグラフ化する。ブラウザだけで動作し、動画は端末外に送信しない。">
-<link rel="stylesheet" href="css/style.css?v=22">
+<link rel="stylesheet" href="css/style.css?v=24">
 
 <!-- PWA（ホーム画面に追加してアプリのように使う） -->
 <link rel="manifest" href="manifest.webmanifest">
@@ -144,28 +144,26 @@
     <h2><span class="step-no">4</span>セット情報</h2>
     <div class="grid">
       <label class="field">日付<input type="date" id="fDate"></label>
+      <label class="field">時刻<input type="time" id="fTime"></label>
       <label class="field">選手<select id="fAthlete"></select></label>
-      <label class="field">種目
-        <input type="text" id="fExercise" list="exerciseList" value="バックスクワット">
-      </label>
+      <label class="field">種目<select id="fExercise"></select></label>
       <label class="field">バー重量 (kg)<input type="number" id="fLoad" value="60" min="0" step="0.5"></label>
       <label class="field">追加システム質量 (kg)<input type="number" id="fExtra" value="0" min="0" step="0.5"></label>
     </div>
     <div class="mode-row" style="margin-top:6px">
       <button class="btn" id="newAthleteBtn" type="button">＋ 初めての人はここで登録</button>
       <button class="btn" id="editAthleteBtn" type="button" disabled>選んだ人の情報を直す</button>
+      <button class="btn" id="addExerciseBtn" type="button" disabled>＋ 種目を追加</button>
     </div>
-    <p class="hint small">追加システム質量：スクワットなどで体重の一部を加味したい場合に入力します。0のままならバー重量だけで力とパワーを計算します（一般的なVBT表示と同じ）。</p>
+    <div class="mode-row" id="addExerciseRow" hidden>
+      <input type="text" id="newExerciseName" placeholder="例: スプリットスクワット" maxlength="24" style="min-width:190px">
+      <button class="btn primary" id="addExerciseOk" type="button">追加</button>
+      <button class="btn" id="addExerciseCancel" type="button">やめる</button>
+    </div>
+    <p class="status-line" id="exerciseStatus"></p>
+    <p class="hint small">追加した種目は<strong>その選手に紐づいて残ります</strong>（次回からプルダウンに出ます）。
+      追加システム質量：スクワットなどで体重の一部を加味したい場合に入力します。0のままならバー重量だけで力とパワーを計算します（一般的なVBT表示と同じ）。</p>
     <label class="field" style="margin-top:8px">メモ<textarea id="fNote" placeholder="コンディション、狙いなど"></textarea></label>
-    <datalist id="exerciseList">
-      <option value="バックスクワット"></option>
-      <option value="フロントスクワット"></option>
-      <option value="ベンチプレス"></option>
-      <option value="デッドリフト"></option>
-      <option value="ショルダープレス"></option>
-      <option value="パワークリーン"></option>
-      <option value="スナッチ"></option>
-    </datalist>
 
     <details style="margin-top:12px">
       <summary class="hint" style="cursor:pointer">解析の詳細設定</summary>
@@ -286,14 +284,12 @@
     <label class="field">性別<select id="hSex"><option value="">すべて</option></select></label>
     <label class="field">選手<select id="hAthlete"><option value="">すべて</option></select></label>
     <label class="field">種目<select id="hExercise"><option value="">すべて</option></select></label>
-    <label class="field">推移の指標
+    <label class="field">推移で見るもの
       <select id="hMetric">
-        <option value="meanVelocity">セット平均 速度 (m/s)</option>
-        <option value="bestVelocity">最速レップの速度 (m/s)</option>
-        <option value="meanPower">セット平均 パワー (W)</option>
-        <option value="peakPower">最大パワー・瞬間 (W)</option>
-        <option value="velocityLoss">速度低下率 (%)</option>
-        <option value="e1rm">推定1RM (kg)</option>
+        <option value="velocity">速度（平均と最大）</option>
+        <option value="power">パワー（平均と最大）</option>
+        <option value="velocityLoss">速度低下率</option>
+        <option value="e1rm">推定1RM</option>
       </select>
     </label>
   </div>
@@ -315,8 +311,9 @@
   </div>
 
   <div class="card">
-    <h2>記録一覧</h2>
-    <ul class="session-list" id="sessionList"></ul>
+    <h2 id="sessionTitle">記録一覧</h2>
+    <p class="hint small" id="sessionHint"></p>
+    <div class="table-scroll"><table id="sessionTable"></table></div>
     <div class="btn-row">
       <button class="btn" id="expCsv" type="button">自分の記録をCSVで書き出す</button>
       <button class="btn" id="expJson" type="button">自分の記録をJSONで書き出す</button>
@@ -554,10 +551,10 @@
 </div>
 
 <!-- ?v= はキャッシュ対策。ファイルを更新したらこの番号を上げること -->
-<script src="js/kinematics.js?v=22"></script>
-<script src="js/tracker.js?v=22"></script>
-<script src="js/charts.js?v=22"></script>
-<script src="js/storage.js?v=22"></script>
-<script src="js/app.js?v=22"></script>
+<script src="js/kinematics.js?v=24"></script>
+<script src="js/tracker.js?v=24"></script>
+<script src="js/charts.js?v=24"></script>
+<script src="js/storage.js?v=24"></script>
+<script src="js/app.js?v=24"></script>
 </body>
 </html>
