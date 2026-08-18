@@ -392,6 +392,27 @@
     try { global.localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (e) { /* noop */ }
   }
 
+  /* ---------- 動作の型 ----------
+   * クリーン・スナッチ等は1レップの中に上昇が何度も入るので、レップ検出を変える。
+   * 名前から既定を決め、種目ごとに手で上書きできるようにする。 */
+  function defaultLiftType(name) {
+    return /クリーン|スナッチ|ジャーク|clean|snatch|jerk/i.test(String(name || ''))
+      ? 'olympic' : 'grind';
+  }
+
+  function liftTypeFor(exercise) {
+    var s = settings();
+    var t = s.liftType && s.liftType[exercise];
+    return t === 'olympic' || t === 'grind' ? t : defaultLiftType(exercise);
+  }
+
+  function setLiftType(exercise, type) {
+    var s = settings();
+    s.liftType = s.liftType || {};
+    s.liftType[exercise] = type;
+    saveSettings(s);
+  }
+
   function mvtFor(exercise) {
     var s = settings();
     return s.mvt[exercise] != null ? s.mvt[exercise] : 0.30;
@@ -541,6 +562,7 @@
     isTrusted: isTrusted, setTrusted: setTrusted, trustedIds: trustedIds,
     ownRecords: ownRecords,
     settings: settings, saveSettings: saveSettings, mvtFor: mvtFor,
+    defaultLiftType: defaultLiftType, liftTypeFor: liftTypeFor, setLiftType: setLiftType,
     exportJSON: exportJSON, exportCSV: exportCSV, importJSON: importJSON, download: download
   };
 })(this);

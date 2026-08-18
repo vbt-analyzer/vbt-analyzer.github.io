@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VBT Analyzer — 挙上速度・パワー解析</title>
 <meta name="description" content="ウエイトトレーニングの動画から挙上速度とパワーを算出し、推移をグラフ化する。ブラウザだけで動作し、動画は端末外に送信しない。">
-<link rel="stylesheet" href="css/style.css?v=25">
+<link rel="stylesheet" href="css/style.css?v=26">
 
 <!-- PWA（ホーム画面に追加してアプリのように使う） -->
 <link rel="manifest" href="manifest.webmanifest">
@@ -165,6 +165,12 @@
       <label class="field">時刻<input type="time" id="fTime"></label>
       <label class="field">選手<select id="fAthlete"></select></label>
       <label class="field">種目<select id="fExercise"></select></label>
+      <label class="field">動作の型
+        <select id="fLiftType">
+          <option value="grind">通常（スクワット・ベンチ等）</option>
+          <option value="olympic">オリンピックリフト（クリーン等）</option>
+        </select>
+      </label>
       <label class="field">バー重量 (kg)<input type="number" id="fLoad" value="60" min="0" step="0.5"></label>
       <label class="field">追加システム質量 (kg)<input type="number" id="fExtra" value="0" min="0" step="0.5"></label>
     </div>
@@ -204,6 +210,11 @@
         <label class="field">レップ判定の速度閾値 (m/s)<input type="number" id="oVelThr" value="0.15" min="0.02" max="1" step="0.01"></label>
         <label class="field">レップ判定の最小可動域 (m)<input type="number" id="oMinRom" value="0.12" min="0.02" max="1" step="0.01"></label>
         <label class="field">探索半径 (処理px)<input type="number" id="oRadius" value="90" min="20" max="300" step="5"></label>
+        <label class="field">実際のレップ数（任意）
+          <input type="number" id="oExpectedReps" value="" min="0" max="30" step="1" placeholder="自動">
+        </label>
+        <label class="field">主動作とみなす速度比<input type="number" id="oDominant" value="0.6" min="0.2" max="0.95" step="0.05"></label>
+        <label class="field">ありえない速度の上限 (m/s)<input type="number" id="oMaxSpeed" value="6" min="2" max="20" step="0.5"></label>
       </div>
     </details>
   </div>
@@ -570,10 +581,10 @@
 </div>
 
 <!-- ?v= はキャッシュ対策。ファイルを更新したらこの番号を上げること -->
-<script src="js/kinematics.js?v=25"></script>
-<script src="js/tracker.js?v=25"></script>
-<script src="js/charts.js?v=25"></script>
-<script src="js/storage.js?v=25"></script>
-<script src="js/app.js?v=25"></script>
+<script src="js/kinematics.js?v=26"></script>
+<script src="js/tracker.js?v=26"></script>
+<script src="js/charts.js?v=26"></script>
+<script src="js/storage.js?v=26"></script>
+<script src="js/app.js?v=26"></script>
 </body>
 </html>

@@ -121,12 +121,41 @@
       if (k > 0 && t[k] - ct[ct.length - 1] < 1e-6) continue;
       ct.push(t[k]); cy.push(y[k]); cx.push(x[k]);
     }
-    // 微分の前に外れ値を落とす。1フレームの誤検出は速度・加速度で大きく増幅されるため。
-    var my = median3(cy), mx = median3(cx);
+    // 追跡が別の物に飛んだフレームを落とす（速度・加速度で大きく増幅されるため）
+    var cleaned = rejectJumps(ct, cy, cx, opts.maxSpeed != null ? opts.maxSpeed : 6);
+
+    // 残った1フレームだけの揺れは中央値で均す
+    var my = median3(cleaned.y), mx = median3(cleaned.x);
     var sw = opts.smoothWindow || 0.08;
-    var series = smoothDifferentiate(ct, my, sw, 5, opts.accWindow || sw * 1.8);
+    var series = smoothDifferentiate(cleaned.t, my, sw, 5, opts.accWindow || sw * 1.8);
     for (var p = 0; p < series.length; p++) series[p].x = mx[p];
+    series.rejected = cleaned.rejected;
     return series;
+  }
+
+  /* ---------- 追跡の飛びを落とす ----------
+   * マーカーが体に隠れる・モーションブラーで見失うと、追跡が別の物に飛ぶ。
+   * そのフレームだけ位置が跳ね、微分すると桁違いの速度・加速度・パワーになる。
+   * バーが物理的に出せない速度（既定 6 m/s）を超える移動を「飛び」とみなして捨てる。
+   * ただし連続して弾かれ続ける場合は、追跡が別の場所で安定した可能性があるので
+   * 基準を置き直して復帰させる（そうしないと以降を丸ごと失う）。
+   */
+  function rejectJumps(t, y, x, maxSpeed) {
+    var n = t.length;
+    if (n < 3) return { t: t.slice(), y: y.slice(), x: x.slice(), rejected: 0 };
+    var ot = [t[0]], oy = [y[0]], ox = [x[0]];
+    var ai = 0, streak = 0, rejected = 0;
+    for (var i = 1; i < n; i++) {
+      var dt = t[i] - t[ai];
+      var sp = dt > 1e-6 ? Math.abs(y[i] - y[ai]) / dt : Infinity;
+      if (sp <= maxSpeed || streak >= 4) {
+        ot.push(t[i]); oy.push(y[i]); ox.push(x[i]);
+        ai = i; streak = 0;
+      } else {
+        rejected++; streak++;
+      }
+    }
+    return { t: ot, y: oy, x: ox, rejected: rejected };
   }
 
   /* ---------- レップ（挙上局面）の切り出し ---------- */
@@ -173,6 +202,41 @@
       var dur = series[e].t - series[s].t;
       if (rom >= minRom && dur >= minDur) reps.push({ s: s, e: e });
     }
+
+    /* 4) オリンピックリフトは1レップの中に上昇が何度も入る。
+     *    クリーンなら「予備動作の切り返し → 引き上げ → キャッチから立ち上がる →
+     *    下ろして受け止め → 立ち上がる」で、上昇局面が4つ前後できる。
+     *    そのまま数えるとレップ数が膨れ、キャッチや受け止めの激しい加速度が
+     *    最大パワー・最高速度に紛れ込む。
+     *    主動作（引き上げ）だけを残す。判定は最高速度の相対比。
+     *    引き上げは他の上昇より明確に速いので、種目や重量によらず効く。 */
+    var dropped = 0;
+    function peakVelOf(r) {
+      var v = -Infinity;
+      for (var k = r.s; k <= r.e; k++) if (series[k].vel > v) v = series[k].vel;
+      return v;
+    }
+    if (opt.repMode === 'olympic' && reps.length > 1) {
+      var ratio = opt.dominantRatio != null ? opt.dominantRatio : 0.6;
+      var pv = reps.map(peakVelOf);
+      var vMax = Math.max.apply(null, pv);
+      var kept = reps.filter(function (r, k) { return pv[k] >= ratio * vMax; });
+      dropped += reps.length - kept.length;
+      reps = kept;
+    }
+
+    /* レップ数が分かっているなら、速い順に必要数だけ残す。
+     * 型の判定に頼らない最後の歯止め。 */
+    if (opt.expectedReps > 0 && reps.length > opt.expectedReps) {
+      var order = reps.map(function (r, k) { return { r: r, v: peakVelOf(r), k: k }; });
+      order.sort(function (a, b) { return b.v - a.v; });
+      order = order.slice(0, opt.expectedReps);
+      order.sort(function (a, b) { return a.k - b.k; });
+      dropped += reps.length - order.length;
+      reps = order.map(function (o) { return o.r; });
+    }
+
+    reps.dropped = dropped;
     return reps;
   }
 
@@ -312,7 +376,11 @@
     var reps = detectReps(series, opts);
     var mass = (opts.loadKg || 0) + (opts.extraKg || 0);
     var metrics = reps.map(function (r) { return repMetrics(series, r, mass); });
-    return { series: series, reps: reps, metrics: metrics };
+    return {
+      series: series, reps: reps, metrics: metrics,
+      droppedReps: reps.dropped || 0,       // 主動作でないと判断して外した上昇の数
+      rejectedFrames: series.rejected || 0  // 追跡の飛びとして捨てたフレーム数
+    };
   }
 
   /* ---------- セット内の速度低下率（疲労指標） ---------- */

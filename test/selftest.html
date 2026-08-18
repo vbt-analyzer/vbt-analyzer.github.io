@@ -93,6 +93,8 @@
    * 最大パワーは「速度 × 力」で、力は加速度＝位置の2階微分に由来する。
    * 誤差が二重に乗るため、フレームレートが低い経路では合否判定せず参考値として出す。 */
   function verify(tag, res, tolAmp, tolRom, tolPow, tolPeak, trustPeakPower) {
+    // 追跡の飛びとして捨てたフレーム数。0でないなら、以降の数値のばらつきの一因になる
+    info(tag + '. 飛びとして捨てたフレーム', res.rejectedFrames || 0, ' フレーム');
     var pos = res.series.map(function (p) { return p.pos; });
     check(tag + '. 位置の振幅',
       (Math.max.apply(null, pos) - Math.min.apply(null, pos)) / 2, AMP_M, tolAmp, ' m');
@@ -262,10 +264,81 @@
       verify('D', VBT.Kin.analyze(s, kinOpts), 4, 5, 8, 25, effectiveFps(s) >= 50);
       notes.push('テストD: シーク経路は ' + s.length + 'フレームを ' + secs.toFixed(1) +
         '秒で処理。再生経路が使えないブラウザ・状況でのみ使われます。');
-      render('');
+      render('<p>テストE（オリンピックリフト）を実行中…</p>');
+      return runOlympicTest();
     }).catch(function (e) {
       render('<p class="FAIL">テストDが失敗: ' + e.message + '</p>');
     });
+  }
+
+  /* ================= E: オリンピックリフトのレップ検出 =================
+   * クリーン／スナッチは1レップの中に上昇が何度も入る（予備動作の切り返し →
+   * 引き上げ → キャッチから立ち上がる → 下ろして受け止め → 立ち上がる）。
+   * 素直に数えるとレップ数が3倍に膨れる。さらに追跡が飛ぶと最大パワーが桁違いになる。
+   * 実測のハングクリーンで両方とも起きたので、再発防止に常設する。 */
+  function runOlympicTest() {
+    var mpp = 0.005, FPS = 60, MASS = 60, CYCLE = 4.40, REPS = 3;
+    var seg = [
+      [0.00, 0.60, 0.60, 0.60],  // 開始姿勢
+      [0.60, 0.95, 0.60, 0.45],  // 予備動作のしゃがみ
+      [0.95, 1.50, 0.45, 1.20],  // 引き上げ（主動作・可動域0.75m）
+      [1.50, 1.72, 1.20, 1.15],  // キャッチで沈む
+      [1.72, 2.72, 1.15, 1.45],  // 立ち上がる（0.30m）
+      [2.72, 2.80, 1.45, 1.45],
+      [2.80, 3.20, 1.45, 0.60],  // 下ろす
+      [3.20, 3.50, 0.60, 0.45],  // 受け止め
+      [3.50, 4.00, 0.45, 0.60],  // 開始姿勢へ（0.15m）
+      [4.00, 4.40, 0.60, 0.60]
+    ];
+    function h(t) {
+      var u = t % CYCLE;
+      for (var i = 0; i < seg.length; i++) {
+        var s = seg[i];
+        if (u >= s[0] && u <= s[1]) {
+          var f = (s[1] - s[0]) < 1e-9 ? 0 : (u - s[0]) / (s[1] - s[0]);
+          return s[2] + (s[3] - s[2]) * (1 - Math.cos(Math.PI * f)) / 2;
+        }
+      }
+      return 0.60;
+    }
+    var samples = [], N = Math.round(CYCLE * REPS * FPS);
+    for (var i = 0; i < N; i++) {
+      var y = 600 - h(i / FPS) / mpp;
+      if (i === 70 || i === 71) y -= 160;   // 追跡が別の物に飛んだフレーム
+      samples.push({ t: i / FPS, x: 200, y: y, ok: true, n: 400 });
+    }
+    var base = {
+      metersPerPixel: mpp, slowFactor: 1, smoothWindow: 0.08, velThreshold: 0.15,
+      minRom: 0.12, minDuration: 0.15, mergeGap: 0.10, loadKg: MASS, extraKg: 0
+    };
+    function run(extra) { return VBT.Kin.analyze(samples, Object.assign({}, base, extra)); }
+
+    var naive = run({ repMode: 'grind', maxSpeed: 1e9 });
+    check('E. 対策なしだとレップ数が膨れる', naive.metrics.length, 9, 0, ' 本');
+    info('E. 対策なしの最高速度（飛びの影響）',
+      Math.max.apply(null, naive.metrics.map(function (m) { return m.peakVelocity; })), ' m/s');
+
+    var jump = run({ repMode: 'grind' });
+    check('E. 飛びを捨てたフレーム数', jump.rejectedFrames, 2, 0, ' フレーム');
+    check('E. 飛び除去後の最高速度',
+      Math.max.apply(null, jump.metrics.map(function (m) { return m.peakVelocity; })), 2.12, 8, ' m/s');
+
+    var oly = run({ repMode: 'olympic' });
+    check('E. オリンピックモードのレップ数', oly.metrics.length, REPS, 0, ' 本');
+    check('E. 外した上昇の数', oly.droppedReps, 6, 0, ' 件');
+    check('E. 可動域が引き上げ分になる', oly.metrics[0].rom, 0.75, 5, ' m');
+    var maxPow = Math.max.apply(null, oly.metrics.map(function (m) { return m.peakPower; }));
+    check('E. 最大パワーが現実的な範囲', maxPow, 1740, 12, ' W');
+
+    var hinted = run({ repMode: 'grind', expectedReps: REPS });
+    check('E. レップ数を指定した場合', hinted.metrics.length, REPS, 0, ' 本');
+
+    notes.push('テストE: 1レップに上昇が3つ入る動作を3回。対策なしでは ' + naive.metrics.length +
+      '本と数え、追跡の飛びで最高速度が ' +
+      Math.max.apply(null, naive.metrics.map(function (m) { return m.peakVelocity; })).toFixed(1) +
+      ' m/s まで跳ねる。オリンピックモードで ' + oly.metrics.length + '本に収まる。');
+    render('');
+    return Promise.resolve();
   }
 })();
 </script>

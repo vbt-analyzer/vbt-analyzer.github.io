@@ -863,6 +863,10 @@
       minRom: Number($('oMinRom').value),
       minDuration: 0.15,
       mergeGap: 0.10,
+      repMode: $('fLiftType').value,
+      dominantRatio: Number($('oDominant').value) || 0.6,
+      maxSpeed: Number($('oMaxSpeed').value) || 6,
+      expectedReps: Number($('oExpectedReps').value) || 0,
       loadKg: loadKg,
       extraKg: extraKg
     });
@@ -881,6 +885,16 @@
       '）、検出率 ' + (okCount / samples.length * 100).toFixed(1) + '%' +
       (lost ? '、未検出 ' + lost + 'フレーム' : '') +
       '、レップ ' + out.metrics.length + '本。';
+    // 何を外したかを言う。黙って捨てるとレップ数が合わない理由が分からなくなる。
+    if (out.droppedReps) {
+      $('runStatus').textContent += ' 主動作でない上昇 ' + out.droppedReps +
+        '件（キャッチからの立ち上がり、下ろしの受け止めなど）を除いています。';
+    }
+    if (out.rejectedFrames) {
+      $('runStatus').textContent += ' 追跡が飛んだ ' + out.rejectedFrames +
+        'フレームを捨てました。';
+    }
+
     // 追跡が飛ぶと物理的にありえない値になる。捨てずに知らせて、判断は利用者に任せる。
     var odd = out.metrics.filter(function (m) {
       return m.peakVelocity > 4 || m.rom > 1.5 || m.duration > 10;
@@ -1371,7 +1385,20 @@
     });
     sel.value = list.indexOf(cur) >= 0 ? cur : list[0];
     $('addExerciseBtn').disabled = !isAuthed(id);
+    syncLiftType();
   }
+
+  // 動作の型は種目ごとに覚える。名前から既定を決め、変えたらその種目に紐づけて保存する。
+  function syncLiftType() {
+    var ex = $('fExercise').value;
+    if (ex) $('fLiftType').value = Store.liftTypeFor(ex);
+  }
+
+  $('fExercise').addEventListener('change', syncLiftType);
+  $('fLiftType').addEventListener('change', function () {
+    var ex = $('fExercise').value;
+    if (ex) Store.setLiftType(ex, this.value);
+  });
 
   function exSay(msg, cls) {
     $('exerciseStatus').textContent = msg || '';
